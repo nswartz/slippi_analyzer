@@ -15,7 +15,9 @@ class ActionState:
     CLIFF_CATCH = 252  # Grabbing ledge
     DAMAGE_FALL = 38  # Tumble
     FALL = 29  # Falling
-    FALL_SPECIAL = 35  # Helpless fall
+    FALL_SPECIAL = 35  # Helpless fall (after recovery move or air dodge)
+    ESCAPE_AIR = 236  # Air dodge
+    DAMAGE_FLY_HI = 87  # Being launched diagonally up
 
 
 # Stage edge x-coordinates (absolute value, edges are symmetric)
@@ -35,8 +37,8 @@ class LedgehogEvent:
     """Internal tracking for a potential ledgehog."""
 
     ledge_grab_frame: int
-    opponent_offstage_frame: int
-    initiating_hit_frame: int | None = None
+    player_left_ledge_frame: int | None = None  # When player left ledge (if they did)
+    opponent_was_helpless: bool = False  # Was opponent ever in FALL_SPECIAL?
 
 
 class LedgehogDetector:
@@ -44,6 +46,7 @@ class LedgehogDetector:
 
     FRAMES_BEFORE = 300  # 5 seconds at 60fps
     FRAMES_AFTER = 120   # 2 seconds at 60fps
+    POST_LEDGE_WINDOW = 120  # Continue tracking for 2 seconds after player leaves ledge
 
     @property
     def name(self) -> str:
@@ -70,18 +73,39 @@ class LedgehogDetector:
                 ActionState.CLIFF_CATCH,
             )
             opponent_offstage = abs(frame.opponent_x) > edge_x
+            opponent_helpless = frame.opponent_action_state == ActionState.FALL_SPECIAL
+            opponent_on_stage = (
+                abs(frame.opponent_x) < edge_x and
+                frame.opponent_y > -20  # Roughly above stage level
+            )
 
-            # Start tracking when player grabs ledge and opponent is offstage
-            if player_on_ledge and opponent_offstage and tracking_event is None:
-                tracking_event = LedgehogEvent(
-                    ledge_grab_frame=frame.frame_number,
-                    opponent_offstage_frame=frame.frame_number,
-                )
+            # Start tracking when player grabs ledge and opponent is offstage OR helpless
+            # (helpless can happen on-stage from Up-B toward ledge)
+            if player_on_ledge and (opponent_offstage or opponent_helpless):
+                if tracking_event is None:
+                    tracking_event = LedgehogEvent(
+                        ledge_grab_frame=frame.frame_number,
+                        opponent_was_helpless=opponent_helpless,
+                    )
 
-            # Check for stock loss while tracking
+            # Continue tracking helpless state even after player leaves ledge
             if tracking_event is not None:
+                if opponent_helpless:
+                    tracking_event.opponent_was_helpless = True
+
+                # Note when player leaves ledge
+                if not player_on_ledge and tracking_event.player_left_ledge_frame is None:
+                    tracking_event.player_left_ledge_frame = frame.frame_number
+
+                # Check for stock loss
                 if frame.opponent_stocks < prev_opponent_stocks:
                     # Ledgehog confirmed!
+                    tags = ["ledgehog:basic"]
+
+                    # Add strict tag if opponent was in helpless state
+                    if tracking_event.opponent_was_helpless:
+                        tags.append("ledgehog:strict")
+
                     frame_start = max(
                         0, tracking_event.ledge_grab_frame - self.FRAMES_BEFORE
                     )
@@ -95,14 +119,19 @@ class LedgehogDetector:
                             replay_path=replay_path,
                             frame_start=frame_start,
                             frame_end=frame_end,
-                            tags=["ledgehog:basic"],
+                            tags=tags,
                             metadata={},
                         )
                     )
                     tracking_event = None
 
-                # Cancel tracking if player leaves ledge without opponent dying
-                elif not player_on_ledge:
+                # Cancel tracking if:
+                # - Opponent lands safely on stage
+                # - Too much time passed since player left ledge
+                elif opponent_on_stage and not opponent_helpless:
+                    tracking_event = None
+                elif (tracking_event.player_left_ledge_frame is not None and
+                      frame.frame_number - tracking_event.player_left_ledge_frame > self.POST_LEDGE_WINDOW):
                     tracking_event = None
 
             prev_opponent_stocks = frame.opponent_stocks

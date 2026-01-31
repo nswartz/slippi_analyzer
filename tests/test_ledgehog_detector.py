@@ -99,3 +99,214 @@ def test_basic_ledgehog_detection() -> None:
     assert moments[0].frame_start >= 0
     # Moment should end after the stock loss
     assert moments[0].frame_end >= 150
+
+
+def test_strict_ledgehog_requires_fall_special() -> None:
+    """Strict ledgehog requires opponent to enter FALL_SPECIAL (helpless) state."""
+    detector = LedgehogDetector()
+    stage_id = 2
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    # Neutral frames
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id))
+
+    # Player on ledge, opponent offstage in FALL_SPECIAL (helpless from recovery)
+    for i in range(100, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 20.0,
+                opponent_y=-50.0,
+                opponent_action=ActionState.FALL_SPECIAL,  # Helpless state
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent loses stock
+    for i in range(150, 200):
+        frames.append(
+            make_frame(
+                i,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    assert len(moments) == 1
+    assert "ledgehog:basic" in moments[0].tags
+    assert "ledgehog:strict" in moments[0].tags
+
+
+def test_no_strict_tag_without_fall_special() -> None:
+    """No strict tag if opponent was never in FALL_SPECIAL (like Peach f-smash case)."""
+    detector = LedgehogDetector()
+    stage_id = 2
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    # Neutral frames
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id))
+
+    # Player on ledge, opponent offstage but in DAMAGE_FLY (being launched, not recovering)
+    for i in range(100, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 20.0,
+                opponent_y=-50.0,
+                opponent_action=ActionState.DAMAGE_FLY_HI,  # Being launched, not helpless
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent loses stock
+    for i in range(150, 200):
+        frames.append(
+            make_frame(
+                i,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    assert len(moments) == 1
+    assert "ledgehog:basic" in moments[0].tags
+    assert "ledgehog:strict" not in moments[0].tags  # No strict - wasn't in helpless
+
+
+def test_strict_ledgehog_on_stage_up_b() -> None:
+    """Strict ledgehog when opponent uses Up-B on stage toward ledge."""
+    detector = LedgehogDetector()
+    stage_id = 2
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    # Neutral frames
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id))
+
+    # Opponent on stage near edge, enters FALL_SPECIAL (from Up-B)
+    # Player grabs ledge
+    for i in range(100, 130):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x - 10.0,  # On stage, near edge
+                opponent_y=20.0,
+                opponent_action=ActionState.FALL_SPECIAL,  # Helpless from Up-B
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent falls offstage and dies
+    for i in range(130, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 20.0,  # Now offstage
+                opponent_y=-80.0,
+                opponent_action=ActionState.FALL_SPECIAL,
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent loses stock
+    for i in range(150, 200):
+        frames.append(
+            make_frame(
+                i,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    assert len(moments) == 1
+    assert "ledgehog:strict" in moments[0].tags
+
+
+def test_strict_ledgehog_from_air_dodge() -> None:
+    """Strict ledgehog when opponent air dodges toward ledge."""
+    detector = LedgehogDetector()
+    stage_id = 2
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    # Neutral frames
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id))
+
+    # Opponent offstage, air dodges (ESCAPE_AIR), then enters FALL_SPECIAL
+    for i in range(100, 110):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 15.0,
+                opponent_y=-30.0,
+                opponent_action=ActionState.ESCAPE_AIR,  # Air dodge
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Air dodge ends, now in FALL_SPECIAL
+    for i in range(110, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 20.0,
+                opponent_y=-60.0,
+                opponent_action=ActionState.FALL_SPECIAL,
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent loses stock
+    for i in range(150, 200):
+        frames.append(
+            make_frame(
+                i,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    assert len(moments) == 1
+    assert "ledgehog:strict" in moments[0].tags
