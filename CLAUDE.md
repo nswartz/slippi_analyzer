@@ -3,6 +3,7 @@
 ## General
 
 - REQUIRED: ensure any created/dispatched sub-agents understand these rules.
+- NEVER install dependencies (npm install, pip install, apt install, etc.). Instead, list what's needed and let the user handle installation.
 
 ## Git Workflow
 
@@ -37,7 +38,7 @@
 - Unit tests for all logic: detectors, clip boundaries, database operations, filename generation
 - No snapshot tests
 - Skip tests for non-logic code (HTML templates, static config, etc.)
-- Integration tests for capture pipeline (with mocked Dolphin/OBS)
+- Integration tests for capture pipeline (with mocked Dolphin/ffmpeg)
 
 ## Attribution
 

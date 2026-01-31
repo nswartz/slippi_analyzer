@@ -1,24 +1,24 @@
-# Slippi Ledgehog Clipper - Design Document
+# Slippi Replay Clipper - Design Document
 
 ## Overview
 
-A tool to scan Slippi replay archives, detect ledgehog moments, and capture them as video clips for compilation videos.
+A tool to scan Slippi replay archives, detect gameplay moments of interest, and capture them as video clips for compilation videos. The first detector targets ledgehogs, but the architecture supports any event type.
 
 **Author:** Noah Swartz (using Claude Code)
 **Date:** 2026-01-31
 
 ## Problem Statement
 
-Finding and clipping specific gameplay moments (like ledgehogs) from thousands of Slippi replays is tedious. This tool automates:
-1. Detecting ledgehog moments in replay files
-2. Recording those moments as video clips via Dolphin + OBS
+Finding and clipping specific gameplay moments from thousands of Slippi replays is tedious. This tool automates:
+1. Detecting tagged moments in replay files (starting with ledgehogs)
+2. Recording those moments as video clips via Dolphin frame dump + ffmpeg
 3. Organizing clips with descriptive filenames for video editing
 
 ## User Context
 
 - **Player connect codes:** PDL-637, PIE-381 (analyze all games from these perspectives, any character)
 - **Replay archive:** Thousands of .slp files
-- **Goal:** Compilation videos of ledgehog highlights
+- **Goal:** Compilation videos of gameplay highlights
 
 ## Architecture
 
@@ -37,7 +37,7 @@ Finding and clipping specific gameplay moments (like ledgehogs) from thousands o
                                    ↓
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         CAPTURE PHASE                               │
-│  moments → Dolphin playback → OBS recording → ffmpeg post-process   │
+│  moments → Dolphin frame dump → ffmpeg encode → organized clips     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,7 +47,10 @@ Finding and clipping specific gameplay moments (like ledgehogs) from thousands o
 - Identify player by connect code (PDL-637 or PIE-381)
 - Run detection algorithms on each game
 - Store tagged moments in SQLite database
-- Incremental: only re-scan new/modified files
+- **Incremental mode (default):** Compare file mtime against database; only parse new/modified files
+  - This is fast: stat() calls on files, no parsing required for unchanged files
+- **Full rescan mode (`--full-rescan`):** Re-run all detectors on all files
+  - Use case: after adding new detectors to find additional moment types
 
 ### Phase 2: Query
 
@@ -57,12 +60,13 @@ Finding and clipping specific gameplay moments (like ledgehogs) from thousands o
 
 ### Phase 3: Capture
 
-- Launch Slippi Dolphin with replay file
-- Connect to OBS via websocket (obs-websocket, built into OBS 28+)
-- Seek to target frame range
-- Record the moment
-- Post-process with ffmpeg: trim frozen frames, normalize to 60fps
+- Configure Dolphin for frame dumping (writes raw frames to disk)
+- Launch Slippi Dolphin with replay file, seek to frame range
+- Dolphin dumps frames for the target segment
+- ffmpeg encodes frames to video (60fps, consistent resolution)
 - Save with descriptive filename
+- **No OBS required** - uses Dolphin's native frame dump feature
+- Can run faster than realtime (no frame limiter)
 
 ## Detection & Tagging System
 
@@ -128,35 +132,43 @@ The clip ends when the opponent is clearly done (past the ledge with no recovery
 
 ## Video Capture Pipeline
 
+Uses Dolphin's native frame dump feature instead of screen capture. This approach is inspired by [slp-to-video](https://github.com/MiguelTornero/slp-to-video) and [Slippipedia](https://github.com/cbartsch/Slippipedia).
+
+### Why Frame Dump Over OBS
+
+- **Deterministic:** Frames can't drop; every frame is captured
+- **Faster than realtime:** With frame limiter disabled, Dolphin renders as fast as possible
+- **Simpler pipeline:** No screen capture, no OBS websocket coordination
+- **Fewer failure points:** Just Dolphin + ffmpeg
+
 ### Workflow Per Clip
 
-1. **Launch Slippi Dolphin**
+1. **Configure Dolphin frame dump**
+   - Enable frame dumping in Dolphin settings
+   - Set output directory for raw frames
+   - Optionally use custom Dolphin build with frame limiter removed
+
+2. **Launch Slippi Dolphin**
    - CLI: `Slippi_Dolphin -e "path/to/replay.slp"`
-   - Starts playback from frame 0
+   - Configure to start at target frame and stop at end frame
 
-2. **Connect to OBS**
-   - Library: `obsws-python`
-   - Commands: start/stop recording
+3. **Dolphin dumps frames**
+   - Raw frames written to configured directory
+   - Audio dumped separately
 
-3. **Seek to target frame**
-   - Keyboard automation (pyautogui) to fast-forward
-   - Alternative: explore Dolphin's pause-at-frame feature
-
-4. **Capture**
-   - Start OBS recording before the moment
-   - Let it play through
-   - Stop recording after end frame + buffer
-
-5. **Post-process with ffmpeg**
-   - Detect and trim frozen/loading frames
-   - Normalize to 60fps, consistent resolution
+4. **ffmpeg encodes to video**
+   - Combine frames + audio into mp4
+   - 60fps, consistent resolution
    - Generate filename: `2025-01-15_vs-Fox_battlefield_ledgehog-strict_001.mp4`
+
+5. **Cleanup**
+   - Delete raw frame files after encoding
 
 ### Batch Mode
 
 - Queue all clips from query
-- Record sequentially (Dolphin limitation: one instance)
-- Post-process in parallel
+- Process sequentially (Dolphin limitation: one instance)
+- Can parallelize ffmpeg encoding while Dolphin processes next clip
 
 ## Error Handling
 
@@ -164,16 +176,17 @@ The clip ends when the opponent is clearly done (past the ledge with no recovery
 
 Before starting any batch:
 - Verify Dolphin executable exists and launches
-- Verify OBS websocket connection works
+- Verify frame dump directory is writable
 - Verify output directory is writable
 - Verify ffmpeg is installed
+- Verify Melee ISO path is configured
 - Fail immediately if any check fails
 
 ### Fail-Fast on Repeated Errors
 
 - Track consecutive failures by error type
 - 3 consecutive failures of same type → abort batch with summary
-- Examples: Dolphin path wrong, OBS not responding, disk full
+- Examples: Dolphin path wrong, disk full, ffmpeg encoding failure
 
 ### Isolated vs Systemic Failures
 
@@ -198,9 +211,8 @@ slippi_analyzer/
 │   │   ├── base.py         # Detector protocol/interface
 │   │   └── ledgehog.py     # Ledgehog detection logic
 │   ├── capture/
-│   │   ├── dolphin.py      # Dolphin automation
-│   │   ├── obs.py          # OBS websocket control
-│   │   └── ffmpeg.py       # Post-processing
+│   │   ├── dolphin.py      # Dolphin frame dump automation
+│   │   └── ffmpeg.py       # Video encoding
 │   └── models.py           # Typed dataclasses (Moment, Tag, etc.)
 ├── tests/
 ├── pyproject.toml
@@ -210,8 +222,11 @@ slippi_analyzer/
 ## CLI Commands
 
 ```bash
-# Index all replays in directory
+# Index all replays in directory (incremental - skips unchanged files)
 slippi-clip scan /path/to/replays
+
+# Full rescan - re-run all detectors (use after adding new detectors)
+slippi-clip scan /path/to/replays --full-rescan
 
 # Find moments matching criteria
 slippi-clip find --tag ledgehog:strict
@@ -236,11 +251,8 @@ connect_codes = ["PDL-637", "PIE-381"]
 replay_directory = "/path/to/slippi/replays"
 output_directory = "./clips"
 dolphin_executable = "/path/to/Slippi_Dolphin"
-
-[obs]
-websocket_host = "localhost"
-websocket_port = 4455
-websocket_password = "your-password"
+melee_iso = "/path/to/melee.iso"
+frame_dump_directory = "/tmp/slippi-clip-frames"
 
 [clips]
 seconds_before = 5
@@ -253,9 +265,7 @@ seconds_after = 2
 - **Replay parsing:** py-slippi
 - **Database:** SQLite
 - **CLI:** Click
-- **OBS control:** obsws-python
 - **Video processing:** ffmpeg (subprocess)
-- **Keyboard automation:** pyautogui
 - **Testing:** pytest, TDD approach
 
 ## Testing Strategy
@@ -270,7 +280,6 @@ seconds_after = 2
 ### Integration Tests (Mocked)
 
 - **Dolphin automation:** Mock process interface
-- **OBS websocket:** Mock connection
 - **ffmpeg calls:** Mock subprocess, verify command construction
 
 ### No Snapshot Tests
@@ -287,20 +296,19 @@ Per project requirements.
 
 ## Dependencies
 
+Python packages:
 ```
 python >= 3.10
 py-slippi
 click
-obsws-python
-pyautogui
 pytest
 pyright
 ```
 
-External:
-- Slippi Dolphin
-- OBS Studio (28+)
+External (user must install separately):
+- Slippi Playback Dolphin
 - ffmpeg
+- Super Smash Bros. Melee ISO
 
 ## Next Steps
 
