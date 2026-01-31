@@ -3,7 +3,8 @@
 ## General
 
 - REQUIRED: ensure any created/dispatched sub-agents understand these rules.
-- NEVER install dependencies (npm install, pip install, apt install, etc.). Instead, list what's needed and let the user handle installation.
+- Installing from existing lockfiles/manifests (npm install, pip install from pyproject.toml) is fine
+- NEVER run system-level installs (dnf, apt, brew, etc.) without asking the user first
 
 ## Git Workflow
 
