@@ -1,0 +1,22 @@
+[project]
+name = "slippi-clip"
+version = "0.1.0"
+description = "Scan Slippi replays for gameplay moments and capture video clips"
+requires-python = ">=3.10"
+dependencies = [
+    "py-slippi>=2.0.0",
+    "click>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pyright>=1.1.0",
+]
+
+[project.scripts]
+slippi-clip = "src.cli:main"
+
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "strict"
