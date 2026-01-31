@@ -28,10 +28,11 @@ class TaggedMoment:
 def generate_clip_filename(moment: TaggedMoment, index: int) -> str:
     """Generate a descriptive filename for a clip.
 
-    Format: {date}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4
+    Format: {date}_{player}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4
     """
     # Get metadata with defaults
     date_str = moment.metadata.get("date", "unknown")
+    player = moment.metadata.get("player", "unknown")
     opponent = moment.metadata.get("opponent", "unknown")
     stage = moment.metadata.get("stage", "unknown")
 
@@ -43,4 +44,4 @@ def generate_clip_filename(moment: TaggedMoment, index: int) -> str:
             primary_tag = tag.replace(":", "-")
             break
 
-    return f"{date_str}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4"
+    return f"{date_str}_{player}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4"

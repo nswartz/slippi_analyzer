@@ -14,13 +14,14 @@ def test_generate_clip_filename_basic() -> None:
         tags=["ledgehog:strict"],
         metadata={
             "date": "2025-01-15",
+            "player": "sheik",
             "opponent": "fox",
             "stage": "battlefield",
         },
     )
 
     filename = generate_clip_filename(moment, index=1)
-    assert filename == "2025-01-15_vs-fox_battlefield_ledgehog-strict_001.mp4"
+    assert filename == "2025-01-15_sheik_vs-fox_battlefield_ledgehog-strict_001.mp4"
 
 
 def test_generate_clip_filename_multiple_tags() -> None:
@@ -32,6 +33,7 @@ def test_generate_clip_filename_multiple_tags() -> None:
         tags=["ledgehog:basic", "ledgehog:strict", "ledgehog:intentional"],
         metadata={
             "date": "2025-01-15",
+            "player": "sheik",
             "opponent": "marth",
             "stage": "yoshis",
         },
@@ -39,7 +41,7 @@ def test_generate_clip_filename_multiple_tags() -> None:
 
     filename = generate_clip_filename(moment, index=5)
     # Should use intentional (most specific)
-    assert filename == "2025-01-15_vs-marth_yoshis_ledgehog-intentional_005.mp4"
+    assert filename == "2025-01-15_sheik_vs-marth_yoshis_ledgehog-intentional_005.mp4"
 
 
 def test_generate_clip_filename_missing_metadata() -> None:
@@ -53,4 +55,4 @@ def test_generate_clip_filename_missing_metadata() -> None:
     )
 
     filename = generate_clip_filename(moment, index=1)
-    assert filename == "unknown_vs-unknown_unknown_ledgehog-basic_001.mp4"
+    assert filename == "unknown_unknown_vs-unknown_unknown_ledgehog-basic_001.mp4"
