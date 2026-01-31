@@ -28,6 +28,17 @@
 
 - There are other skills with updated instructions in v4.1.2, but it is not available yet.
 
+## Testing
+
+- REQUIRED: Use `superpowers:test-driven-development` skill for all implementation work
+- After invoking the TDD skill, create the marker file: `touch /tmp/.superpowers-tdd-session-$(date +%Y%m%d)`
+  - A PreToolUse hook blocks edits to production code until this marker exists
+- Write tests first, then implementation (red-green-refactor)
+- Unit tests for all logic: detectors, clip boundaries, database operations, filename generation
+- No snapshot tests
+- Skip tests for non-logic code (HTML templates, static config, etc.)
+- Integration tests for capture pipeline (with mocked Dolphin/OBS)
+
 ## Attribution
 
 When crediting Claude Code as author, co-author, or generator of code, PRs, commits, or features, always frame it as a human using Claude as a tool. Never imply Claude acted autonomously.
