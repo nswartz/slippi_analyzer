@@ -1,0 +1,190 @@
+"""Replay scanner for parsing .slp files to FrameData."""
+
+from pathlib import Path
+
+from slippi import Game
+from slippi.id import CSSCharacter, Stage
+
+from src.detectors.base import FrameData
+
+
+# Map stage IDs to readable names (lowercase, no spaces)
+STAGE_NAMES: dict[int, str] = {
+    2: "fountain",
+    3: "stadium",
+    8: "yoshis",
+    28: "dreamland",
+    31: "battlefield",
+    32: "fd",
+}
+
+
+def get_character_name(char: CSSCharacter | int) -> str:
+    """Get lowercase character name from CSS character enum or int."""
+    if isinstance(char, int):
+        try:
+            char = CSSCharacter(char)
+        except ValueError:
+            return "unknown"
+    return char.name.lower().replace("_", "")
+
+
+def parse_replay_to_frames(
+    replay_path: Path,
+    player_port: int,
+) -> dict[int, list[FrameData]]:
+    """Parse a .slp replay file into FrameData for each opponent.
+
+    For singles matches, returns a single entry.
+    For doubles matches, returns one entry per opponent (teammates excluded).
+
+    Args:
+        replay_path: Path to the .slp file
+        player_port: Port index of the player (0-3)
+
+    Returns:
+        Dictionary mapping opponent port to list of FrameData
+    """
+    game = Game(replay_path)
+
+    # Determine stage
+    stage_id = game.start.stage
+    if isinstance(stage_id, Stage):
+        stage_id = stage_id.value
+
+    # Get player's team (if teams mode)
+    player_info = game.start.players[player_port]
+    if player_info is None:
+        raise ValueError(f"No player at port {player_port}")
+
+    player_team = player_info.team if game.start.is_teams else None
+
+    # Find opponent ports (different team or all others in singles)
+    opponent_ports: list[int] = []
+    for port_idx, player in enumerate(game.start.players):
+        if player is None:
+            continue
+        if port_idx == player_port:
+            continue
+        # In teams mode, opponent is on different team
+        if player_team is not None:
+            if player.team != player_team:
+                opponent_ports.append(port_idx)
+        else:
+            # Singles mode - everyone else is opponent
+            opponent_ports.append(port_idx)
+
+    # Build FrameData for each opponent
+    result: dict[int, list[FrameData]] = {}
+
+    for opp_port in opponent_ports:
+        frames: list[FrameData] = []
+
+        for frame in game.frames:
+            # Skip countdown frames (negative index)
+            if frame.index < 0:
+                continue
+
+            player_port_data = frame.ports[player_port]
+            opp_port_data = frame.ports[opp_port]
+
+            # Skip if either port has no data
+            if player_port_data is None or opp_port_data is None:
+                continue
+            if player_port_data.leader is None or opp_port_data.leader is None:
+                continue
+
+            player_post = player_port_data.leader.post
+            opp_post = opp_port_data.leader.post
+
+            frames.append(
+                FrameData(
+                    frame_number=frame.index,
+                    player_x=player_post.position.x,
+                    player_y=player_post.position.y,
+                    player_action_state=player_post.state,
+                    player_stocks=player_post.stocks,
+                    opponent_x=opp_post.position.x,
+                    opponent_y=opp_post.position.y,
+                    opponent_action_state=opp_post.state,
+                    opponent_stocks=opp_post.stocks,
+                    stage_id=stage_id,
+                )
+            )
+
+        result[opp_port] = frames
+
+    return result
+
+
+class ReplayScanner:
+    """Scanner for extracting moments from Slippi replays."""
+
+    def get_metadata(self, replay_path: Path) -> dict[str, str]:
+        """Extract metadata from a replay file.
+
+        Returns dict with: date, stage, player (character name)
+        """
+        game = Game(replay_path)
+
+        # Date
+        date_str = "unknown"
+        if game.metadata.date:
+            date_str = game.metadata.date.strftime("%Y-%m-%d")
+
+        # Stage
+        stage_id = game.start.stage
+        if isinstance(stage_id, Stage):
+            stage_id = stage_id.value
+        stage_name = STAGE_NAMES.get(stage_id, "unknown")
+
+        # Find first human player's character (assume port 0 for now)
+        player_char = "unknown"
+        for player in game.start.players:
+            if player is not None:
+                player_char = get_character_name(player.character)
+                break
+
+        return {
+            "date": date_str,
+            "stage": stage_name,
+            "player": player_char,
+        }
+
+    def get_opponent_ports(self, replay_path: Path, player_port: int) -> list[int]:
+        """Get list of opponent port indices.
+
+        In singles, returns all other ports.
+        In doubles, returns only ports on opposing team.
+        """
+        game = Game(replay_path)
+
+        player_info = game.start.players[player_port]
+        if player_info is None:
+            return []
+
+        player_team = player_info.team if game.start.is_teams else None
+
+        opponent_ports: list[int] = []
+        for port_idx, player in enumerate(game.start.players):
+            if player is None:
+                continue
+            if port_idx == player_port:
+                continue
+            if player_team is not None:
+                if player.team != player_team:
+                    opponent_ports.append(port_idx)
+            else:
+                opponent_ports.append(port_idx)
+
+        return opponent_ports
+
+    def get_opponent_character(
+        self, replay_path: Path, opponent_port: int
+    ) -> str:
+        """Get the character name for an opponent port."""
+        game = Game(replay_path)
+        player = game.start.players[opponent_port]
+        if player is None:
+            return "unknown"
+        return get_character_name(player.character)
