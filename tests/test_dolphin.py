@@ -120,3 +120,46 @@ def test_setup_frame_dump_configures_dolphin_ini(tmp_path: Path) -> None:
     assert "[DSP]" in content, f"Expected DSP section in: {content}"
     assert "DumpAudio = True" in content, f"Expected DumpAudio in: {content}"
     assert "DumpAudioSilent = True" in content, f"Expected DumpAudioSilent in: {content}"
+
+
+def test_wait_for_completion_monitors_file_size(tmp_path: Path) -> None:
+    """wait_for_completion terminates Dolphin when frame dump file stops growing."""
+    config = DolphinConfig(
+        executable=Path("/usr/bin/dolphin-emu"),
+        user_dir=tmp_path,
+    )
+    controller = DolphinController(config)
+
+    # Create frame dump file that simulates a completed dump
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    video_file = frame_dir / "framedump0.avi"
+    video_file.write_bytes(b"x" * 1000)
+
+    # Mock the process
+    mock_process = MagicMock()
+    mock_process.poll.return_value = None  # Process still running
+    mock_process.returncode = 0
+    controller._process = mock_process
+
+    # Track terminate calls
+    terminate_called = False
+    def mock_terminate():
+        nonlocal terminate_called
+        terminate_called = True
+        mock_process.poll.return_value = 0
+
+    mock_process.terminate.side_effect = mock_terminate
+    mock_process.wait.return_value = 0
+
+    # Run wait_for_completion - should detect file is stable and terminate
+    result = controller.wait_for_completion(
+        frame_dir=frame_dir,
+        check_interval=0.05,
+        stable_threshold=0.1,
+        timeout=5.0,
+    )
+
+    # Should have terminated the process
+    assert terminate_called, "Process should be terminated when file stops growing"
+    assert result == 0

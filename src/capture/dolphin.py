@@ -185,10 +185,23 @@ class DolphinController:
 
         self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
 
-    def wait_for_completion(self, timeout: float | None = None) -> int:
+    def wait_for_completion(
+        self,
+        frame_dir: Path | None = None,
+        check_interval: float = 1.0,
+        stable_threshold: float = 3.0,
+        timeout: float | None = None,
+    ) -> int:
         """Wait for Dolphin to finish capturing.
 
-        Monitors stdout for frame progress and terminates Dolphin when complete.
+        Monitors frame dump file size. When the file stops growing for
+        stable_threshold seconds, playback is considered complete.
+
+        Args:
+            frame_dir: Directory where frame dump files are written
+            check_interval: Seconds between file size checks
+            stable_threshold: Seconds file must be stable before terminating
+            timeout: Maximum seconds to wait (None = no limit)
 
         Returns:
             Return code from Dolphin process (0 on success)
@@ -196,28 +209,30 @@ class DolphinController:
         if self._process is None:
             raise RuntimeError("No capture in progress")
 
-        game_end_frame = -124
-        current_frame = -125
+        video_file = frame_dir / "framedump0.avi" if frame_dir else None
+        last_size = -1
+        stable_time = 0.0
+        elapsed = 0.0
 
-        # Read stdout to track frame progress
         while self._process.poll() is None:
-            if self._process.stdout is None:
+            # Check for timeout
+            if timeout is not None and elapsed >= timeout:
                 break
 
-            line = self._process.stdout.readline()
-            if not line:
-                break
+            # Check file size if we have a frame_dir
+            if video_file and video_file.exists():
+                current_size = video_file.stat().st_size
+                if current_size == last_size:
+                    stable_time += check_interval
+                    if stable_time >= stable_threshold:
+                        # File has stopped growing, playback is complete
+                        break
+                else:
+                    stable_time = 0.0
+                    last_size = current_size
 
-            line = line.strip()
-
-            if line.startswith("[GAME_END_FRAME] "):
-                game_end_frame = int(line.removeprefix("[GAME_END_FRAME] "))
-            elif line.startswith("[CURRENT_FRAME] "):
-                current_frame = int(line.removeprefix("[CURRENT_FRAME] "))
-
-            # Check if playback is complete
-            if current_frame >= game_end_frame and game_end_frame > 0:
-                break
+            time.sleep(check_interval)
+            elapsed += check_interval
 
         # Give Dolphin time to finish writing files
         time.sleep(2)

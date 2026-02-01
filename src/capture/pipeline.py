@@ -51,8 +51,8 @@ class CapturePipeline:
                 end_frame=moment.frame_end,
             )
 
-            # Wait for capture to complete
-            return_code = self._dolphin.wait_for_completion()
+            # Wait for capture to complete (monitors frame dump file)
+            return_code = self._dolphin.wait_for_completion(frame_dir=frame_dir)
             if return_code != 0:
                 return None
 
