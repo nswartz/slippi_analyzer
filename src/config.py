@@ -20,7 +20,7 @@ class Config:
 
     # Database
     db_path: Path = field(
-        default_factory=lambda: Path("~/.config/slippi-clip/moments.db").expanduser()
+        default_factory=lambda: Path("~/.slippi-clip/moments.db").expanduser()
     )
 
     # Dolphin
@@ -89,4 +89,4 @@ def load_config(config_path: Path) -> Config:
 
 def get_default_config_path() -> Path:
     """Get the default configuration file path."""
-    return Path("~/.config/slippi-clip/config.toml").expanduser()
+    return Path("~/.slippi-clip/config.toml").expanduser()

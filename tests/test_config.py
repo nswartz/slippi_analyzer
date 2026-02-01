@@ -9,7 +9,7 @@ def test_config_defaults() -> None:
     """Config has sensible defaults when no file exists."""
     config = Config()
 
-    assert config.db_path == Path("~/.config/slippi-clip/moments.db").expanduser()
+    assert config.db_path == Path("~/.slippi-clip/moments.db").expanduser()
     assert config.player_port == 0
 
 
@@ -42,7 +42,7 @@ def test_load_config_missing_file() -> None:
 
     # Should return default config
     assert config.player_port == 0
-    assert config.db_path == Path("~/.config/slippi-clip/moments.db").expanduser()
+    assert config.db_path == Path("~/.slippi-clip/moments.db").expanduser()
 
 
 def test_config_partial_override(tmp_path: Path) -> None:
@@ -58,7 +58,7 @@ player_port = 3
     # Overridden value
     assert config.player_port == 3
     # Default values
-    assert config.db_path == Path("~/.config/slippi-clip/moments.db").expanduser()
+    assert config.db_path == Path("~/.slippi-clip/moments.db").expanduser()
 
 
 def test_config_player_tags_default() -> None:
@@ -102,7 +102,7 @@ def test_load_config_expands_tilde_in_paths(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text("""
 [database]
-path = "~/.config/slippi-clip/moments.db"
+path = "~/.slippi-clip/moments.db"
 """)
 
     config = load_config(config_path)
