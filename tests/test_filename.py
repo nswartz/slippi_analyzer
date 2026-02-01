@@ -6,7 +6,7 @@ from src.models import TaggedMoment, generate_clip_filename
 
 
 def test_generate_clip_filename_basic() -> None:
-    """Generate descriptive filename from moment metadata."""
+    """Generate descriptive filename from moment metadata (no tags in filename)."""
     moment = TaggedMoment(
         replay_path=Path("/replays/game.slp"),
         frame_start=1000,
@@ -21,27 +21,26 @@ def test_generate_clip_filename_basic() -> None:
     )
 
     filename = generate_clip_filename(moment, index=1)
-    assert filename == "2025-01-15_sheik_vs-fox_battlefield_ledgehog-strict_001.mp4"
+    # Tags are stored in sidecar JSON, not filename
+    assert filename == "001_sheik_vs-fox_battlefield.mp4"
 
 
-def test_generate_clip_filename_multiple_tags() -> None:
-    """Use most specific ledgehog tag in filename."""
+def test_generate_clip_filename_preserves_index() -> None:
+    """Index is zero-padded in filename."""
     moment = TaggedMoment(
         replay_path=Path("/replays/game.slp"),
         frame_start=1000,
         frame_end=1500,
-        tags=["ledgehog:basic", "ledgehog:strict", "ledgehog:intentional"],
+        tags=["ledgehog:basic", "ledgehog:strict"],
         metadata={
-            "date": "2025-01-15",
             "player": "sheik",
             "opponent": "marth",
             "stage": "yoshis",
         },
     )
 
-    filename = generate_clip_filename(moment, index=5)
-    # Should use intentional (most specific)
-    assert filename == "2025-01-15_sheik_vs-marth_yoshis_ledgehog-intentional_005.mp4"
+    filename = generate_clip_filename(moment, index=42)
+    assert filename == "042_sheik_vs-marth_yoshis.mp4"
 
 
 def test_generate_clip_filename_missing_metadata() -> None:
@@ -55,4 +54,4 @@ def test_generate_clip_filename_missing_metadata() -> None:
     )
 
     filename = generate_clip_filename(moment, index=1)
-    assert filename == "unknown_unknown_vs-unknown_unknown_ledgehog-basic_001.mp4"
+    assert filename == "001_unknown_vs-unknown_unknown.mp4"

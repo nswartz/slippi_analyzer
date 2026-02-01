@@ -6,6 +6,7 @@ from pathlib import Path
 from src.capture.dolphin import DolphinConfig, DolphinController
 from src.capture.ffmpeg import FFmpegEncoder
 from src.models import TaggedMoment, generate_clip_filename
+from src.sidecar import write_sidecar_file
 
 
 class CapturePipeline:
@@ -63,6 +64,9 @@ class CapturePipeline:
                 output_file=output_path,
                 fps=60,
             )
+
+            # Write sidecar metadata file
+            write_sidecar_file(output_path, moment)
 
             return output_path
 
