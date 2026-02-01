@@ -184,9 +184,13 @@ def capture(ctx: click.Context, tag: tuple[str, ...], output: Path, db: Path | N
         click.echo("No moments found matching the specified tags.")
         return
 
-    click.echo(f"Capturing {len(all_moments)} clips to {output}")
+    # Create subdirectory named after the searched tags
+    tag_dirname = "_".join(t.replace(":", "-") for t in tag)
+    output_dir = output / tag_dirname
 
-    pipeline = CapturePipeline(output_dir=output)
+    click.echo(f"Capturing {len(all_moments)} clips to {output_dir}")
+
+    pipeline = CapturePipeline(output_dir=output_dir)
     results = pipeline.capture_moments(all_moments)
 
     click.echo(f"Captured {len(results)} clips")
