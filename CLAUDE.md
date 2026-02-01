@@ -43,6 +43,15 @@
 - Run `.venv/bin/pyright src/` before committing to catch type errors and unused imports
 - The project uses `typeCheckingMode = "strict"` - all code must pass strict type checking
 
+## Script Usage
+
+When needing to check or verify something programmatically:
+
+1. **Prefer simple commands first** - Use existing CLI tools, grep, or direct file reads before writing scripts
+2. **Evaluate necessity** - Ask: "Can this be done with a simpler method?" before writing a bespoke script
+3. **Reusable scripts** - If a script would be useful for repeated tasks, consider adding it to `scripts/` directory with documentation
+4. **One-off checks** - For truly one-off checks, inline scripts are acceptable but keep them minimal
+
 ## Testing
 
 - REQUIRED: Use `superpowers:test-driven-development` skill for all implementation work

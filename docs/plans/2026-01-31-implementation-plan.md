@@ -10,6 +10,33 @@
 
 ---
 
+## Implementation Status
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 1 | Project Setup | ✅ Complete |
+| 2 | Core Models (TaggedMoment) | ✅ Complete |
+| 3 | Database Layer - Schema | ✅ Complete |
+| 4 | Database Layer - CRUD Operations | ✅ Complete |
+| 5 | Detector Base Protocol | ✅ Complete |
+| 6 | Ledgehog Detector - Basic Detection | ✅ Complete |
+| 7 | Ledgehog Detector - Strict and Intentional Tags | ✅ Complete |
+| 8 | Filename Generation | ✅ Complete |
+| 9 | CLI Scaffold | ✅ Complete |
+| 10 | FFmpeg Wrapper | ✅ Complete |
+| 11 | Integration - Wire Up Scan Command | ✅ Complete |
+| 12 | Scanner - Parse Replays with py-slippi | ✅ Complete |
+| 13 | Scanner - Run Detectors (Registry + ReplayScanner) | ✅ Complete |
+| 14 | Find Command - Query Implementation | ✅ Complete |
+| 15 | Dolphin Automation | ✅ Complete |
+| 16 | Capture Command - Full Pipeline | ✅ Complete |
+| 17 | Compile Command | ✅ Complete |
+| 18 | Configuration File Support | ✅ Complete |
+
+**Status:** All 18 tasks complete. The slippi-clip CLI tool is fully implemented.
+
+---
+
 ## Task 1: Project Setup
 
 **Files:**
@@ -1253,13 +1280,14 @@ def test_generate_clip_filename_basic() -> None:
         tags=["ledgehog:strict"],
         metadata={
             "date": "2025-01-15",
+            "player": "sheik",
             "opponent": "fox",
             "stage": "battlefield",
         },
     )
 
     filename = generate_clip_filename(moment, index=1)
-    assert filename == "2025-01-15_vs-fox_battlefield_ledgehog-strict_001.mp4"
+    assert filename == "2025-01-15_sheik_vs-fox_battlefield_ledgehog-strict_001.mp4"
 
 
 def test_generate_clip_filename_multiple_tags() -> None:
@@ -1271,6 +1299,7 @@ def test_generate_clip_filename_multiple_tags() -> None:
         tags=["ledgehog:basic", "ledgehog:strict", "ledgehog:intentional"],
         metadata={
             "date": "2025-01-15",
+            "player": "sheik",
             "opponent": "marth",
             "stage": "yoshis",
         },
@@ -1278,7 +1307,7 @@ def test_generate_clip_filename_multiple_tags() -> None:
 
     filename = generate_clip_filename(moment, index=5)
     # Should use intentional (most specific)
-    assert filename == "2025-01-15_vs-marth_yoshis_ledgehog-intentional_005.mp4"
+    assert filename == "2025-01-15_sheik_vs-marth_yoshis_ledgehog-intentional_005.mp4"
 
 
 def test_generate_clip_filename_missing_metadata() -> None:
@@ -1292,7 +1321,7 @@ def test_generate_clip_filename_missing_metadata() -> None:
     )
 
     filename = generate_clip_filename(moment, index=1)
-    assert filename == "unknown_vs-unknown_unknown_ledgehog-basic_001.mp4"
+    assert filename == "unknown_unknown_vs-unknown_unknown_ledgehog-basic_001.mp4"
 ```
 
 **Step 2: Run tests to verify they fail**
@@ -1308,10 +1337,11 @@ Add to `src/models.py`:
 def generate_clip_filename(moment: TaggedMoment, index: int) -> str:
     """Generate a descriptive filename for a clip.
 
-    Format: {date}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4
+    Format: {date}_{player}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4
     """
     # Get metadata with defaults
     date_str = moment.metadata.get("date", "unknown")
+    player = moment.metadata.get("player", "unknown")
     opponent = moment.metadata.get("opponent", "unknown")
     stage = moment.metadata.get("stage", "unknown")
 
@@ -1323,7 +1353,7 @@ def generate_clip_filename(moment: TaggedMoment, index: int) -> str:
             primary_tag = tag.replace(":", "-")
             break
 
-    return f"{date_str}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4"
+    return f"{date_str}_{player}_vs-{opponent}_{stage}_{primary_tag}_{index:03d}.mp4"
 ```
 
 **Step 4: Run tests to verify they pass**
@@ -1764,40 +1794,1753 @@ git commit -m "feat: wire up scan command with database initialization"
 
 ---
 
-## Remaining Tasks (Summary)
+## Task 12: Scanner - Parse Replays with py-slippi
 
-The following tasks follow the same pattern. Each implements one piece:
+> **✅ IMPLEMENTED** - This task has been completed. See `src/scanner.py` and `tests/test_scanner.py`.
 
-### Task 12: Scanner - Parse Replays with py-slippi
-- Create `src/scanner.py`
-- Parse .slp files to FrameData
-- Requires py-slippi library
+**Files:**
+- Create: `tests/test_scanner.py`
+- Create: `src/scanner.py`
 
-### Task 13: Scanner - Run Detectors
-- Integrate detector registry
-- Run all detectors on parsed frames
-- Store moments in database
+**Step 1: Write failing tests for replay parsing**
 
-### Task 14: Find Command - Query Implementation
-- Wire up `find` command to query database
-- Display results to user
+```python
+"""Tests for replay scanner."""
 
-### Task 15: Dolphin Automation
-- Create `src/capture/dolphin.py`
-- Configure and launch Dolphin for frame dumping
-- Handle start/stop at specific frames
+from pathlib import Path
 
-### Task 16: Capture Command - Full Pipeline
-- Wire up `capture` command
-- Dolphin frame dump → FFmpeg encode → organized output
+import pytest
 
-### Task 17: Compile Command
-- Concatenate multiple clips with FFmpeg
-- Consistent formatting
+from src.detectors.base import FrameData
+from src.scanner import parse_replay_to_frames
 
-### Task 18: Configuration File Support
-- Parse `~/.config/slippi-clip/config.toml`
-- Apply defaults from config
+
+def test_parse_replay_returns_frame_data_list() -> None:
+    """parse_replay_to_frames returns list of FrameData for each opponent."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    # This is a doubles match (4 players), so we get frames for each opponent
+    # When player_port=0 (Sheik), opponents are ports 2 and 3 (Fox and Peach)
+    result = parse_replay_to_frames(replay_path, player_port=0)
+
+    # Should return a dict mapping opponent port to frame list
+    assert isinstance(result, dict)
+    # In doubles, Sheik (port 0) has 2 opponents (ports 2, 3)
+    assert len(result) >= 1  # At least one opponent
+
+    # Each opponent's frames should be a list of FrameData
+    for _, frames in result.items():
+        assert isinstance(frames, list)
+        assert len(frames) > 0
+        assert isinstance(frames[0], FrameData)
+
+
+def test_frame_data_has_correct_stage_id() -> None:
+    """FrameData should have correct stage ID from replay."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    result = parse_replay_to_frames(replay_path, player_port=0)
+    # Get frames for any opponent
+    frames = next(iter(result.values()))
+
+    # Stage 31 = Battlefield
+    assert frames[0].stage_id == 31
+
+
+def test_frame_data_tracks_positions() -> None:
+    """FrameData should track player and opponent positions."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    result = parse_replay_to_frames(replay_path, player_port=0)
+    frames = next(iter(result.values()))
+
+    # Positions should be floats
+    assert isinstance(frames[0].player_x, float)
+    assert isinstance(frames[0].player_y, float)
+    assert isinstance(frames[0].opponent_x, float)
+    assert isinstance(frames[0].opponent_y, float)
+
+
+def test_frame_data_tracks_stocks() -> None:
+    """FrameData should track player and opponent stocks."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    result = parse_replay_to_frames(replay_path, player_port=0)
+    frames = next(iter(result.values()))
+
+    # Game starts with 4 stocks each
+    assert frames[0].player_stocks == 4
+    assert frames[0].opponent_stocks == 4
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_scanner.py -v`
+Expected: FAIL with "cannot import name 'parse_replay_to_frames'"
+
+**Step 3: Write implementation**
+
+```python
+"""Replay scanner for parsing .slp files to FrameData."""
+
+from pathlib import Path
+
+from slippi import Game
+
+from src.detectors.base import FrameData
+
+
+def parse_replay_to_frames(
+    replay_path: Path,
+    player_port: int,
+) -> dict[int, list[FrameData]]:
+    """Parse a .slp replay file into FrameData for each opponent.
+
+    For singles matches, returns a single entry.
+    For doubles matches, returns one entry per opponent (teammates excluded).
+
+    Args:
+        replay_path: Path to the .slp file
+        player_port: Port index of the player (0-3)
+
+    Returns:
+        Dictionary mapping opponent port to list of FrameData
+    """
+    game = Game(replay_path)
+
+    if game.start is None:
+        raise ValueError(f"Replay has no start data: {replay_path}")
+
+    # Determine stage
+    stage_id = game.start.stage.value
+
+    # Get player's team (if teams mode)
+    player_info = game.start.players[player_port]
+    if player_info is None:
+        raise ValueError(f"No player at port {player_port}")
+
+    player_team = player_info.team if game.start.is_teams else None
+
+    # Find opponent ports (different team or all others in singles)
+    opponent_ports: list[int] = []
+    for port_idx, player in enumerate(game.start.players):
+        if player is None:
+            continue
+        if port_idx == player_port:
+            continue
+        # In teams mode, opponent is on different team
+        if player_team is not None:
+            if player.team != player_team:
+                opponent_ports.append(port_idx)
+        else:
+            # Singles mode - everyone else is opponent
+            opponent_ports.append(port_idx)
+
+    # Build FrameData for each opponent
+    result: dict[int, list[FrameData]] = {}
+
+    for opp_port in opponent_ports:
+        frames: list[FrameData] = []
+
+        for frame in game.frames:
+            # Skip countdown frames (negative index)
+            if frame.index < 0:
+                continue
+
+            player_port_data = frame.ports[player_port]
+            opp_port_data = frame.ports[opp_port]
+
+            # Skip if either port has no data
+            if player_port_data is None or opp_port_data is None:
+                continue
+
+            player_post = player_port_data.leader.post
+            opp_post = opp_port_data.leader.post
+
+            # Skip if post-frame data not available
+            if player_post is None or opp_post is None:
+                continue
+
+            frames.append(
+                FrameData(
+                    frame_number=frame.index,
+                    player_x=player_post.position.x,
+                    player_y=player_post.position.y,
+                    player_action_state=player_post.state,
+                    player_stocks=player_post.stocks,
+                    opponent_x=opp_post.position.x,
+                    opponent_y=opp_post.position.y,
+                    opponent_action_state=opp_post.state,
+                    opponent_stocks=opp_post.stocks,
+                    stage_id=stage_id,
+                )
+            )
+
+        result[opp_port] = frames
+
+    return result
+```
+
+**Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_scanner.py -v`
+Expected: PASS (4 tests) - or SKIP if fixture not available
+
+**Step 5: Commit**
+
+```bash
+git add src/scanner.py tests/test_scanner.py
+git commit -m "feat: add replay scanner for parsing .slp files to FrameData"
+```
+
+---
+
+## Task 13: Scanner - Run Detectors (Detector Registry + ReplayScanner)
+
+> **✅ IMPLEMENTED** - This task has been completed. See `src/detectors/registry.py`, `src/scanner.py` (ReplayScanner class), and tests.
+
+**Files:**
+- Create: `tests/test_detector_registry.py`
+- Create: `src/detectors/registry.py`
+- Modify: `src/scanner.py` (add ReplayScanner class)
+- Modify: `tests/test_scanner.py` (add ReplayScanner tests)
+
+**Step 1: Write failing tests for detector registry**
+
+```python
+"""Tests for detector registry and integration."""
+
+from pathlib import Path
+
+from src.detectors.base import FrameData
+from src.detectors.registry import DetectorRegistry
+from src.models import TaggedMoment
+
+
+class MockDetector:
+    """A mock detector for testing."""
+
+    def __init__(self, name: str = "mock", moments_to_return: list[TaggedMoment] | None = None) -> None:
+        self._name = name
+        self._moments = moments_to_return or []
+        self.detect_called_with: list[FrameData] | None = None
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def detect(self, frames: list[FrameData], replay_path: Path) -> list[TaggedMoment]:
+        self.detect_called_with = frames
+        return self._moments
+
+
+def test_registry_register_detector() -> None:
+    """Registry can register detectors."""
+    registry = DetectorRegistry()
+    detector = MockDetector("test")
+
+    registry.register(detector)
+
+    assert "test" in registry.detector_names
+
+
+def test_registry_get_detector() -> None:
+    """Registry can retrieve registered detector by name."""
+    registry = DetectorRegistry()
+    detector = MockDetector("test")
+    registry.register(detector)
+
+    retrieved = registry.get("test")
+
+    assert retrieved is detector
+
+
+def test_registry_run_all_detectors() -> None:
+    """Registry runs all registered detectors on frames."""
+    registry = DetectorRegistry()
+
+    # Create mock detectors that return moments
+    moment1 = TaggedMoment(
+        replay_path=Path("/test.slp"),
+        frame_start=100,
+        frame_end=200,
+        tags=["detector1:tag"],
+        metadata={},
+    )
+    moment2 = TaggedMoment(
+        replay_path=Path("/test.slp"),
+        frame_start=300,
+        frame_end=400,
+        tags=["detector2:tag"],
+        metadata={},
+    )
+
+    detector1 = MockDetector("detector1", [moment1])
+    detector2 = MockDetector("detector2", [moment2])
+
+    registry.register(detector1)
+    registry.register(detector2)
+
+    frames = [
+        FrameData(
+            frame_number=i,
+            player_x=0.0,
+            player_y=0.0,
+            player_action_state=0,
+            player_stocks=4,
+            opponent_x=0.0,
+            opponent_y=0.0,
+            opponent_action_state=0,
+            opponent_stocks=4,
+            stage_id=31,
+        )
+        for i in range(10)
+    ]
+
+    moments = registry.run_all(frames, Path("/test.slp"))
+
+    # Both detectors should have been called
+    assert detector1.detect_called_with == frames
+    assert detector2.detect_called_with == frames
+
+    # Should return moments from both detectors
+    assert len(moments) == 2
+    assert moment1 in moments
+    assert moment2 in moments
+
+
+def test_registry_default_detectors() -> None:
+    """Default registry includes ledgehog detector."""
+    registry = DetectorRegistry.with_default_detectors()
+
+    assert "ledgehog" in registry.detector_names
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_detector_registry.py -v`
+Expected: FAIL with "cannot import name 'DetectorRegistry'"
+
+**Step 3: Write registry implementation**
+
+Create `src/detectors/registry.py`:
+
+```python
+"""Detector registry for managing and running moment detectors."""
+
+from pathlib import Path
+
+from src.detectors.base import Detector, FrameData
+from src.models import TaggedMoment
+
+
+class DetectorRegistry:
+    """Registry for managing moment detectors."""
+
+    def __init__(self) -> None:
+        self._detectors: dict[str, Detector] = {}
+
+    def register(self, detector: Detector) -> None:
+        """Register a detector."""
+        self._detectors[detector.name] = detector
+
+    def get(self, name: str) -> Detector | None:
+        """Get a detector by name."""
+        return self._detectors.get(name)
+
+    @property
+    def detector_names(self) -> list[str]:
+        """List of registered detector names."""
+        return list(self._detectors.keys())
+
+    def run_all(
+        self, frames: list[FrameData], replay_path: Path
+    ) -> list[TaggedMoment]:
+        """Run all registered detectors on frames."""
+        all_moments: list[TaggedMoment] = []
+
+        for detector in self._detectors.values():
+            moments = detector.detect(frames, replay_path)
+            all_moments.extend(moments)
+
+        return all_moments
+
+    @classmethod
+    def with_default_detectors(cls) -> "DetectorRegistry":
+        """Create a registry with default detectors."""
+        from src.detectors.ledgehog import LedgehogDetector
+
+        registry = cls()
+        registry.register(LedgehogDetector())
+        return registry
+```
+
+**Step 4: Write ReplayScanner class tests**
+
+Add to `tests/test_scanner.py`:
+
+```python
+from src.detectors.registry import DetectorRegistry
+from src.models import TaggedMoment
+from src.scanner import ReplayScanner
+
+
+def test_replay_scanner_extracts_metadata() -> None:
+    """ReplayScanner extracts metadata from replay."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    scanner = ReplayScanner()
+    metadata = scanner.get_metadata(replay_path)
+
+    assert "date" in metadata
+    assert "stage" in metadata
+    assert "player" in metadata  # Character name
+
+
+def test_replay_scanner_identifies_teammates_vs_opponents() -> None:
+    """ReplayScanner correctly identifies teammates vs opponents in doubles."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    scanner = ReplayScanner()
+    # Port 0 = Sheik, Port 1 = Marth (teammate), Ports 2,3 = opponents (Fox, Peach)
+    opponents = scanner.get_opponent_ports(replay_path, player_port=0)
+
+    # In doubles, should identify port 2 and 3 as opponents
+    # Port 0 and 1 are on the same team
+    assert 0 not in opponents  # Self is not an opponent
+    assert 1 not in opponents  # Teammate is not an opponent
+    assert 2 in opponents or 3 in opponents  # At least one opponent identified
+
+
+def test_replay_scanner_scan_replay_runs_detectors(tmp_path: Path) -> None:
+    """ReplayScanner.scan_replay runs detectors and returns moments."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    scanner = ReplayScanner()
+    registry = DetectorRegistry.with_default_detectors()
+
+    # Scan the replay
+    moments = scanner.scan_replay(
+        replay_path=replay_path,
+        player_port=0,
+        registry=registry,
+    )
+
+    # Should return a list of moments (may be empty if no ledgehogs in this replay)
+    assert isinstance(moments, list)
+    for moment in moments:
+        assert isinstance(moment, TaggedMoment)
+
+
+def test_replay_scanner_scan_replay_adds_metadata(tmp_path: Path) -> None:
+    """ReplayScanner.scan_replay adds replay metadata to moments."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    # Create a mock detector that always returns a moment
+    class AlwaysDetectMock:
+        @property
+        def name(self) -> str:
+            return "always"
+
+        def detect(
+            self, frames: list[FrameData], replay_path: Path
+        ) -> list[TaggedMoment]:
+            if frames:
+                return [
+                    TaggedMoment(
+                        replay_path=replay_path,
+                        frame_start=0,
+                        frame_end=100,
+                        tags=["test:always"],
+                        metadata={},
+                    )
+                ]
+            return []
+
+    scanner = ReplayScanner()
+    registry = DetectorRegistry()
+    registry.register(AlwaysDetectMock())
+
+    moments = scanner.scan_replay(
+        replay_path=replay_path,
+        player_port=0,
+        registry=registry,
+    )
+
+    # Should have moments with metadata filled in
+    assert len(moments) >= 1
+    moment = moments[0]
+    assert "date" in moment.metadata
+    assert "stage" in moment.metadata
+    assert "player" in moment.metadata
+    assert "opponent" in moment.metadata
+```
+
+**Step 5: Write ReplayScanner implementation**
+
+Add to `src/scanner.py`:
+
+```python
+from slippi.id import CSSCharacter
+
+from src.detectors.registry import DetectorRegistry
+from src.models import TaggedMoment
+
+
+# Map stage IDs to readable names (lowercase, no spaces)
+STAGE_NAMES: dict[int, str] = {
+    2: "fountain",
+    3: "stadium",
+    8: "yoshis",
+    28: "dreamland",
+    31: "battlefield",
+    32: "fd",
+}
+
+
+def get_character_name(char: CSSCharacter) -> str:
+    """Get lowercase character name from CSS character enum."""
+    return char.name.lower().replace("_", "")
+
+
+class ReplayScanner:
+    """Scanner for extracting moments from Slippi replays."""
+
+    def get_metadata(self, replay_path: Path) -> dict[str, str]:
+        """Extract metadata from a replay file.
+
+        Returns dict with: date, stage, player (character name)
+        """
+        game = Game(replay_path)
+
+        # Date
+        date_str = "unknown"
+        if game.metadata is not None and game.metadata.date is not None:
+            date_str = game.metadata.date.strftime("%Y-%m-%d")
+
+        # Stage
+        stage_name = "unknown"
+        player_char = "unknown"
+        if game.start is not None:
+            stage_id = game.start.stage.value
+            stage_name = STAGE_NAMES.get(stage_id, "unknown")
+
+            # Find first human player's character (assume port 0 for now)
+            for player in game.start.players:
+                if player is not None:
+                    player_char = get_character_name(player.character)
+                    break
+
+        return {
+            "date": date_str,
+            "stage": stage_name,
+            "player": player_char,
+        }
+
+    def get_opponent_ports(self, replay_path: Path, player_port: int) -> list[int]:
+        """Get list of opponent port indices.
+
+        In singles, returns all other ports.
+        In doubles, returns only ports on opposing team.
+        """
+        game = Game(replay_path)
+
+        if game.start is None:
+            return []
+
+        player_info = game.start.players[player_port]
+        if player_info is None:
+            return []
+
+        player_team = player_info.team if game.start.is_teams else None
+
+        opponent_ports: list[int] = []
+        for port_idx, player in enumerate(game.start.players):
+            if player is None:
+                continue
+            if port_idx == player_port:
+                continue
+            if player_team is not None:
+                if player.team != player_team:
+                    opponent_ports.append(port_idx)
+            else:
+                opponent_ports.append(port_idx)
+
+        return opponent_ports
+
+    def get_opponent_character(
+        self, replay_path: Path, opponent_port: int
+    ) -> str:
+        """Get the character name for an opponent port."""
+        game = Game(replay_path)
+        if game.start is None:
+            return "unknown"
+        player = game.start.players[opponent_port]
+        if player is None:
+            return "unknown"
+        return get_character_name(player.character)
+
+    def scan_replay(
+        self,
+        replay_path: Path,
+        player_port: int,
+        registry: DetectorRegistry,
+    ) -> list[TaggedMoment]:
+        """Scan a replay for moments using all registered detectors.
+
+        Parses the replay, runs all detectors, and enriches moments with metadata.
+
+        Args:
+            replay_path: Path to the .slp file
+            player_port: Port index of the player (0-3)
+            registry: DetectorRegistry with detectors to run
+
+        Returns:
+            List of detected moments with metadata filled in
+        """
+        # Get base metadata
+        metadata = self.get_metadata(replay_path)
+
+        # Parse replay to frames for each opponent
+        frames_by_opponent = parse_replay_to_frames(replay_path, player_port)
+
+        all_moments: list[TaggedMoment] = []
+
+        # Run detectors for each opponent
+        for opponent_port, frames in frames_by_opponent.items():
+            opponent_char = self.get_opponent_character(replay_path, opponent_port)
+
+            # Run all detectors
+            moments = registry.run_all(frames, replay_path)
+
+            # Enrich moments with metadata
+            for moment in moments:
+                moment.metadata.update(metadata)
+                moment.metadata["opponent"] = opponent_char
+
+            all_moments.extend(moments)
+
+        return all_moments
+```
+
+**Step 6: Run all tests to verify they pass**
+
+Run: `pytest tests/test_scanner.py tests/test_detector_registry.py -v`
+Expected: PASS
+
+**Step 7: Commit**
+
+```bash
+git add src/scanner.py src/detectors/registry.py tests/test_scanner.py tests/test_detector_registry.py
+git commit -m "feat: add detector registry and ReplayScanner for running detectors"
+```
+
+---
+
+## Task 14: Find Command - Query Implementation
+
+> **✅ IMPLEMENTED** - This task has been completed. See `src/cli.py` (find command) and `tests/test_cli.py`.
+
+**Files:**
+- Modify: `tests/test_cli.py`
+- Modify: `src/cli.py`
+
+**Step 1: Write failing tests for find command**
+
+Add to `tests/test_cli.py`:
+
+```python
+from src.database import MomentDatabase
+from src.models import TaggedMoment
+
+
+def test_find_queries_database_by_tag(tmp_path: Path) -> None:
+    """Find command queries database and displays results."""
+    db_path = tmp_path / "test.db"
+
+    # Set up database with test moments
+    db = MomentDatabase(db_path)
+    db.initialize()
+
+    moment1 = TaggedMoment(
+        replay_path=Path("/replays/game1.slp"),
+        frame_start=1000,
+        frame_end=1500,
+        tags=["ledgehog:basic"],
+        metadata={"opponent": "fox", "stage": "battlefield"},
+    )
+    moment2 = TaggedMoment(
+        replay_path=Path("/replays/game2.slp"),
+        frame_start=2000,
+        frame_end=2500,
+        tags=["ledgehog:strict"],
+        metadata={"opponent": "marth", "stage": "fd"},
+    )
+
+    db.store_moment(moment1, mtime=1000.0)
+    db.store_moment(moment2, mtime=1000.0)
+
+    runner = CliRunner()
+    result = runner.invoke(main, [
+        "find",
+        "--tag", "ledgehog:basic",
+        "--db", str(db_path),
+    ])
+
+    assert result.exit_code == 0
+    # Should show the found moment info
+    assert "game1.slp" in result.output
+    assert "fox" in result.output or "1000" in result.output
+
+
+def test_find_displays_count(tmp_path: Path) -> None:
+    """Find command shows count of matching moments."""
+    db_path = tmp_path / "test.db"
+
+    db = MomentDatabase(db_path)
+    db.initialize()
+
+    # Store 3 moments with same tag
+    for i in range(3):
+        moment = TaggedMoment(
+            replay_path=Path(f"/replays/game{i}.slp"),
+            frame_start=1000 + i * 100,
+            frame_end=1500 + i * 100,
+            tags=["ledgehog:basic"],
+            metadata={},
+        )
+        db.store_moment(moment, mtime=1000.0)
+
+    runner = CliRunner()
+    result = runner.invoke(main, [
+        "find",
+        "--tag", "ledgehog:basic",
+        "--db", str(db_path),
+    ])
+
+    assert result.exit_code == 0
+    # Should indicate 3 moments found
+    assert "3" in result.output
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_cli.py::test_find_queries_database_by_tag -v`
+Expected: FAIL - find command doesn't query database
+
+**Step 3: Update find command implementation**
+
+Update the `find` function in `src/cli.py`:
+
+```python
+@main.command()
+@click.option("--tag", multiple=True, help="Filter by tag")
+@click.option("--opponent", help="Filter by opponent character")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("~/.config/slippi-clip/moments.db").expanduser(),
+    help="Database path",
+)
+def find(tag: tuple[str, ...], opponent: str | None, db: Path) -> None:
+    """Find moments matching criteria."""
+    database = MomentDatabase(db)
+
+    # Find moments by tag
+    all_moments: list[TaggedMoment] = []
+    if tag:
+        for t in tag:
+            moments = database.find_moments_by_tag(t)
+            all_moments.extend(moments)
+    else:
+        click.echo("No tag specified. Use --tag to filter moments.")
+        return
+
+    # Filter by opponent if specified
+    if opponent:
+        all_moments = [
+            m for m in all_moments
+            if m.metadata.get("opponent", "").lower() == opponent.lower()
+        ]
+
+    click.echo(f"Found {len(all_moments)} moments")
+
+    # Display results
+    for moment in all_moments:
+        replay_name = moment.replay_path.name
+        opp = moment.metadata.get("opponent", "unknown")
+        stage = moment.metadata.get("stage", "unknown")
+        tags_str = ", ".join(moment.tags)
+        click.echo(
+            f"  {replay_name}: frames {moment.frame_start}-{moment.frame_end} "
+            f"vs {opp} on {stage} [{tags_str}]"
+        )
+```
+
+**Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_cli.py -v`
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/cli.py tests/test_cli.py
+git commit -m "feat: add detector registry and implement find command"
+```
+
+---
+
+## Task 15: Dolphin Automation
+
+**Files:**
+- Create: `tests/test_dolphin.py`
+- Create: `src/capture/dolphin.py`
+
+**Step 1: Write failing tests for Dolphin configuration**
+
+```python
+"""Tests for Dolphin automation."""
+
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+from src.capture.dolphin import (
+    DolphinConfig,
+    DolphinController,
+    build_dolphin_command,
+)
+
+
+def test_dolphin_config_defaults() -> None:
+    """DolphinConfig has sensible defaults."""
+    config = DolphinConfig()
+
+    assert config.executable == Path("/usr/bin/dolphin-emu")
+    assert config.user_dir is not None
+    assert config.iso_path is None
+
+
+def test_dolphin_config_custom_paths() -> None:
+    """DolphinConfig accepts custom paths."""
+    config = DolphinConfig(
+        executable=Path("/custom/dolphin"),
+        user_dir=Path("/custom/user"),
+        iso_path=Path("/path/to/melee.iso"),
+    )
+
+    assert config.executable == Path("/custom/dolphin")
+    assert config.iso_path == Path("/path/to/melee.iso")
+
+
+def test_build_dolphin_command() -> None:
+    """Build correct Dolphin launch command."""
+    config = DolphinConfig(
+        executable=Path("/usr/bin/dolphin-emu"),
+        user_dir=Path("/home/user/.dolphin-slippi"),
+        iso_path=Path("/games/melee.iso"),
+    )
+
+    cmd = build_dolphin_command(
+        config=config,
+        replay_path=Path("/replays/game.slp"),
+        start_frame=1000,
+        end_frame=2000,
+        output_dir=Path("/tmp/frames"),
+    )
+
+    assert "/usr/bin/dolphin-emu" in cmd[0]
+    assert "-e" in cmd  # Execute/play mode
+    assert "-u" in cmd  # User directory
+
+
+def test_dolphin_controller_setup_dump_config(tmp_path: Path) -> None:
+    """DolphinController sets up frame dump configuration."""
+    user_dir = tmp_path / "dolphin"
+    user_dir.mkdir()
+
+    config = DolphinConfig(
+        executable=Path("/usr/bin/dolphin-emu"),
+        user_dir=user_dir,
+    )
+
+    controller = DolphinController(config)
+    controller.setup_frame_dump(
+        output_dir=tmp_path / "frames",
+        start_frame=100,
+        end_frame=500,
+    )
+
+    # Check that config file was created/modified
+    gfx_ini = user_dir / "Config" / "GFX.ini"
+    assert gfx_ini.exists()
+
+    content = gfx_ini.read_text()
+    assert "DumpFrames = True" in content or "DumpFrames=True" in content
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_dolphin.py -v`
+Expected: FAIL with "cannot import name 'DolphinConfig'"
+
+**Step 3: Write implementation**
+
+```python
+"""Dolphin emulator automation for frame dumping."""
+
+import configparser
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass
+class DolphinConfig:
+    """Configuration for Dolphin emulator."""
+
+    executable: Path = field(default_factory=lambda: Path("/usr/bin/dolphin-emu"))
+    user_dir: Path | None = field(
+        default_factory=lambda: Path.home() / ".dolphin-slippi"
+    )
+    iso_path: Path | None = None
+
+
+def build_dolphin_command(
+    config: DolphinConfig,
+    replay_path: Path,
+    start_frame: int,
+    end_frame: int,
+    output_dir: Path,
+) -> list[str]:
+    """Build command to launch Dolphin for frame dumping.
+
+    Args:
+        config: Dolphin configuration
+        replay_path: Path to .slp replay file
+        start_frame: Frame to start recording
+        end_frame: Frame to stop recording
+        output_dir: Directory for frame dump output
+
+    Returns:
+        Command as list of strings
+    """
+    cmd = [str(config.executable)]
+
+    if config.user_dir:
+        cmd.extend(["-u", str(config.user_dir)])
+
+    if config.iso_path:
+        cmd.extend(["-e", str(config.iso_path)])
+
+    # Slippi-specific replay playback arguments
+    cmd.extend([
+        "-i", str(replay_path),  # Input replay
+        "--output-directory", str(output_dir),
+        "--start-frame", str(start_frame),
+        "--end-frame", str(end_frame),
+    ])
+
+    return cmd
+
+
+class DolphinController:
+    """Controller for Dolphin emulator frame dumping."""
+
+    def __init__(self, config: DolphinConfig) -> None:
+        self.config = config
+        self._process: subprocess.Popen[bytes] | None = None
+
+    def setup_frame_dump(
+        self,
+        output_dir: Path,
+        start_frame: int,
+        end_frame: int,
+    ) -> None:
+        """Configure Dolphin for frame dumping.
+
+        Modifies GFX.ini to enable frame dumping.
+        """
+        if self.config.user_dir is None:
+            raise ValueError("user_dir must be set to configure frame dump")
+
+        config_dir = self.config.user_dir / "Config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        gfx_ini_path = config_dir / "GFX.ini"
+
+        # Parse existing config or create new
+        gfx_config = configparser.ConfigParser()
+        if gfx_ini_path.exists():
+            gfx_config.read(gfx_ini_path)
+
+        # Ensure Settings section exists
+        if "Settings" not in gfx_config:
+            gfx_config["Settings"] = {}
+
+        # Enable frame dumping
+        gfx_config["Settings"]["DumpFrames"] = "True"
+        gfx_config["Settings"]["DumpFramesAsImages"] = "True"
+        gfx_config["Settings"]["DumpPath"] = str(output_dir)
+
+        # Write config
+        with open(gfx_ini_path, "w") as f:
+            gfx_config.write(f)
+
+    def start_capture(
+        self,
+        replay_path: Path,
+        start_frame: int,
+        end_frame: int,
+        output_dir: Path,
+    ) -> None:
+        """Start Dolphin for frame capture.
+
+        Args:
+            replay_path: Path to replay file
+            start_frame: Frame to start capturing
+            end_frame: Frame to stop capturing
+            output_dir: Directory for output frames
+        """
+        self.setup_frame_dump(output_dir, start_frame, end_frame)
+
+        cmd = build_dolphin_command(
+            config=self.config,
+            replay_path=replay_path,
+            start_frame=start_frame,
+            end_frame=end_frame,
+            output_dir=output_dir,
+        )
+
+        self._process = subprocess.Popen(cmd)
+
+    def wait_for_completion(self, timeout: float | None = None) -> int:
+        """Wait for Dolphin to finish capturing.
+
+        Returns:
+            Return code from Dolphin process
+        """
+        if self._process is None:
+            raise RuntimeError("No capture in progress")
+
+        return self._process.wait(timeout=timeout)
+
+    def stop(self) -> None:
+        """Stop Dolphin capture."""
+        if self._process is not None:
+            self._process.terminate()
+            self._process.wait(timeout=10)
+            self._process = None
+```
+
+**Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_dolphin.py -v`
+Expected: PASS (4 tests)
+
+**Step 5: Commit**
+
+```bash
+git add src/capture/dolphin.py tests/test_dolphin.py
+git commit -m "feat: add Dolphin controller for frame dumping"
+```
+
+---
+
+## Task 16: Capture Command - Full Pipeline
+
+**Files:**
+- Create: `tests/test_capture_pipeline.py`
+- Create: `src/capture/pipeline.py`
+- Modify: `src/cli.py`
+
+**Step 1: Write failing tests for capture pipeline**
+
+```python
+"""Tests for capture pipeline."""
+
+from pathlib import Path
+from unittest.mock import patch, MagicMock, call
+
+from src.capture.pipeline import CapturePipeline
+from src.models import TaggedMoment
+
+
+def test_pipeline_captures_single_moment(tmp_path: Path) -> None:
+    """Pipeline captures a single moment through Dolphin and FFmpeg."""
+    moment = TaggedMoment(
+        replay_path=Path("/replays/game.slp"),
+        frame_start=1000,
+        frame_end=2000,
+        tags=["ledgehog:basic"],
+        metadata={"date": "2025-01-15", "opponent": "fox", "stage": "battlefield"},
+    )
+
+    output_dir = tmp_path / "clips"
+
+    with patch("src.capture.pipeline.DolphinController") as mock_dolphin, \
+         patch("src.capture.pipeline.FFmpegEncoder") as mock_ffmpeg:
+
+        # Setup mocks
+        mock_dolphin_instance = MagicMock()
+        mock_dolphin.return_value = mock_dolphin_instance
+        mock_dolphin_instance.wait_for_completion.return_value = 0
+
+        mock_ffmpeg_instance = MagicMock()
+        mock_ffmpeg.return_value = mock_ffmpeg_instance
+
+        pipeline = CapturePipeline(output_dir=output_dir)
+        result = pipeline.capture_moment(moment, index=1)
+
+        # Verify Dolphin was called with correct frames
+        mock_dolphin_instance.start_capture.assert_called_once()
+        call_kwargs = mock_dolphin_instance.start_capture.call_args
+        assert call_kwargs.kwargs["start_frame"] == 1000
+        assert call_kwargs.kwargs["end_frame"] == 2000
+
+        # Verify FFmpeg was called
+        mock_ffmpeg_instance.encode.assert_called_once()
+
+        # Should return output path
+        assert result is not None
+        assert result.suffix == ".mp4"
+
+
+def test_pipeline_captures_multiple_moments(tmp_path: Path) -> None:
+    """Pipeline captures multiple moments in sequence."""
+    moments = [
+        TaggedMoment(
+            replay_path=Path(f"/replays/game{i}.slp"),
+            frame_start=1000 + i * 1000,
+            frame_end=2000 + i * 1000,
+            tags=["ledgehog:basic"],
+            metadata={},
+        )
+        for i in range(3)
+    ]
+
+    output_dir = tmp_path / "clips"
+
+    with patch("src.capture.pipeline.DolphinController") as mock_dolphin, \
+         patch("src.capture.pipeline.FFmpegEncoder") as mock_ffmpeg:
+
+        mock_dolphin_instance = MagicMock()
+        mock_dolphin.return_value = mock_dolphin_instance
+        mock_dolphin_instance.wait_for_completion.return_value = 0
+
+        mock_ffmpeg_instance = MagicMock()
+        mock_ffmpeg.return_value = mock_ffmpeg_instance
+
+        pipeline = CapturePipeline(output_dir=output_dir)
+        results = pipeline.capture_moments(moments)
+
+        # All 3 should be captured
+        assert len(results) == 3
+        assert mock_dolphin_instance.start_capture.call_count == 3
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_capture_pipeline.py -v`
+Expected: FAIL with "cannot import name 'CapturePipeline'"
+
+**Step 3: Write pipeline implementation**
+
+```python
+"""Capture pipeline for recording moments as video clips."""
+
+import shutil
+import tempfile
+from pathlib import Path
+
+from src.capture.dolphin import DolphinConfig, DolphinController
+from src.capture.ffmpeg import FFmpegEncoder
+from src.models import TaggedMoment, generate_clip_filename
+
+
+class CapturePipeline:
+    """Pipeline for capturing moments as video clips."""
+
+    def __init__(
+        self,
+        output_dir: Path,
+        dolphin_config: DolphinConfig | None = None,
+    ) -> None:
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.dolphin_config = dolphin_config or DolphinConfig()
+        self._dolphin = DolphinController(self.dolphin_config)
+        self._ffmpeg = FFmpegEncoder()
+
+    def capture_moment(
+        self,
+        moment: TaggedMoment,
+        index: int,
+    ) -> Path | None:
+        """Capture a single moment as a video clip.
+
+        Args:
+            moment: The moment to capture
+            index: Index for filename generation
+
+        Returns:
+            Path to the generated video clip, or None if capture failed
+        """
+        # Create temp directory for frames
+        with tempfile.TemporaryDirectory() as temp_dir:
+            frame_dir = Path(temp_dir) / "frames"
+            frame_dir.mkdir()
+
+            # Start Dolphin capture
+            self._dolphin.start_capture(
+                replay_path=moment.replay_path,
+                start_frame=moment.frame_start,
+                end_frame=moment.frame_end,
+                output_dir=frame_dir,
+            )
+
+            # Wait for capture to complete
+            return_code = self._dolphin.wait_for_completion()
+            if return_code != 0:
+                return None
+
+            # Generate output filename
+            filename = generate_clip_filename(moment, index)
+            output_path = self.output_dir / filename
+
+            # Encode frames to video
+            self._ffmpeg.encode(
+                frame_dir=frame_dir,
+                output_file=output_path,
+                fps=60,
+            )
+
+            return output_path
+
+    def capture_moments(
+        self,
+        moments: list[TaggedMoment],
+    ) -> list[Path]:
+        """Capture multiple moments as video clips.
+
+        Args:
+            moments: List of moments to capture
+
+        Returns:
+            List of paths to generated video clips
+        """
+        results: list[Path] = []
+
+        for i, moment in enumerate(moments, start=1):
+            result = self.capture_moment(moment, index=i)
+            if result is not None:
+                results.append(result)
+
+        return results
+```
+
+**Step 4: Update capture CLI command**
+
+Update `src/cli.py`:
+
+```python
+from src.capture.pipeline import CapturePipeline
+
+
+@main.command()
+@click.option("--tag", multiple=True, help="Filter by tag")
+@click.option("-o", "--output", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("~/.config/slippi-clip/moments.db").expanduser(),
+    help="Database path",
+)
+def capture(tag: tuple[str, ...], output: Path, db: Path) -> None:
+    """Capture video clips for matching moments."""
+    database = MomentDatabase(db)
+
+    # Find moments by tag
+    all_moments: list[TaggedMoment] = []
+    for t in tag:
+        moments = database.find_moments_by_tag(t)
+        all_moments.extend(moments)
+
+    if not all_moments:
+        click.echo("No moments found matching the specified tags.")
+        return
+
+    click.echo(f"Capturing {len(all_moments)} clips to {output}")
+
+    pipeline = CapturePipeline(output_dir=output)
+    results = pipeline.capture_moments(all_moments)
+
+    click.echo(f"Captured {len(results)} clips")
+    for path in results:
+        click.echo(f"  {path}")
+```
+
+**Step 5: Run tests to verify they pass**
+
+Run: `pytest tests/test_capture_pipeline.py tests/test_cli.py -v`
+Expected: PASS
+
+**Step 6: Commit**
+
+```bash
+git add src/capture/pipeline.py src/cli.py tests/test_capture_pipeline.py
+git commit -m "feat: add capture pipeline for recording moments as video clips"
+```
+
+---
+
+## Task 17: Compile Command
+
+**Files:**
+- Create: `tests/test_compile.py`
+- Create: `src/capture/compile.py`
+- Modify: `src/cli.py`
+
+**Step 1: Write failing tests for clip compilation**
+
+```python
+"""Tests for clip compilation."""
+
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+from src.capture.compile import build_concat_command, compile_clips
+
+
+def test_build_concat_command() -> None:
+    """Build correct ffmpeg concat command."""
+    clips = [
+        Path("/clips/clip1.mp4"),
+        Path("/clips/clip2.mp4"),
+        Path("/clips/clip3.mp4"),
+    ]
+    output = Path("/output/final.mp4")
+
+    cmd = build_concat_command(clips, output)
+
+    assert "ffmpeg" in cmd[0]
+    assert "-f" in cmd
+    assert "concat" in cmd
+    # Output file should be in command
+    assert str(output) in cmd
+
+
+def test_build_concat_command_creates_list_file(tmp_path: Path) -> None:
+    """Concat command creates a list file for ffmpeg."""
+    clips = [
+        tmp_path / "clip1.mp4",
+        tmp_path / "clip2.mp4",
+    ]
+    # Create dummy files
+    for clip in clips:
+        clip.touch()
+
+    output = tmp_path / "final.mp4"
+
+    cmd = build_concat_command(clips, output, list_file=tmp_path / "list.txt")
+
+    list_file = tmp_path / "list.txt"
+    assert list_file.exists()
+
+    content = list_file.read_text()
+    assert "clip1.mp4" in content
+    assert "clip2.mp4" in content
+
+
+def test_compile_clips_calls_ffmpeg(tmp_path: Path) -> None:
+    """compile_clips calls ffmpeg with concat command."""
+    clips = [
+        tmp_path / "clip1.mp4",
+        tmp_path / "clip2.mp4",
+    ]
+    for clip in clips:
+        clip.touch()
+
+    output = tmp_path / "final.mp4"
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+
+        compile_clips(clips, output)
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "ffmpeg" in call_args[0]
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_compile.py -v`
+Expected: FAIL with "cannot import name 'build_concat_command'"
+
+**Step 3: Write implementation**
+
+```python
+"""Clip compilation using FFmpeg."""
+
+import subprocess
+import tempfile
+from pathlib import Path
+
+
+def build_concat_command(
+    clips: list[Path],
+    output: Path,
+    list_file: Path | None = None,
+) -> list[str]:
+    """Build ffmpeg command to concatenate clips.
+
+    Args:
+        clips: List of clip paths to concatenate
+        output: Output file path
+        list_file: Optional path for the concat list file
+
+    Returns:
+        Command as list of strings
+    """
+    # Create list file for ffmpeg concat
+    if list_file is None:
+        list_file = Path(tempfile.mktemp(suffix=".txt"))
+
+    with open(list_file, "w") as f:
+        for clip in clips:
+            # FFmpeg concat format requires 'file' prefix
+            f.write(f"file '{clip.absolute()}'\n")
+
+    return [
+        "ffmpeg",
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", str(list_file),
+        "-c", "copy",
+        str(output),
+    ]
+
+
+def compile_clips(
+    clips: list[Path],
+    output: Path,
+) -> None:
+    """Compile multiple clips into a single video.
+
+    Args:
+        clips: List of clip paths to concatenate
+        output: Output file path
+
+    Raises:
+        RuntimeError: If ffmpeg fails
+    """
+    if not clips:
+        raise ValueError("No clips to compile")
+
+    # Create temp list file
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        for clip in clips:
+            f.write(f"file '{clip.absolute()}'\n")
+        list_file = Path(f.name)
+
+    try:
+        cmd = build_concat_command(clips, output, list_file=list_file)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {result.stderr}")
+    finally:
+        list_file.unlink(missing_ok=True)
+```
+
+**Step 4: Update compile CLI command**
+
+Update `src/cli.py`:
+
+```python
+from src.capture.compile import compile_clips as compile_clips_fn
+
+
+@main.command("compile")
+@click.argument("clips_dir", type=click.Path(exists=True, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path), required=True)
+def compile_clips(clips_dir: Path, output: Path) -> None:
+    """Compile clips into a single video."""
+    # Find all mp4 files in directory
+    clips = sorted(clips_dir.glob("*.mp4"))
+
+    if not clips:
+        click.echo(f"No .mp4 files found in {clips_dir}")
+        return
+
+    click.echo(f"Compiling {len(clips)} clips to {output}")
+
+    compile_clips_fn(clips, output)
+
+    click.echo(f"Compilation complete: {output}")
+```
+
+**Step 5: Run tests to verify they pass**
+
+Run: `pytest tests/test_compile.py tests/test_cli.py -v`
+Expected: PASS
+
+**Step 6: Commit**
+
+```bash
+git add src/capture/compile.py src/cli.py tests/test_compile.py
+git commit -m "feat: add clip compilation command"
+```
+
+---
+
+## Task 18: Configuration File Support
+
+**Files:**
+- Create: `tests/test_config.py`
+- Create: `src/config.py`
+- Modify: `src/cli.py`
+
+**Step 1: Write failing tests for configuration loading**
+
+```python
+"""Tests for configuration file support."""
+
+from pathlib import Path
+
+from src.config import Config, load_config
+
+
+def test_config_defaults() -> None:
+    """Config has sensible defaults when no file exists."""
+    config = Config()
+
+    assert config.db_path == Path("~/.config/slippi-clip/moments.db").expanduser()
+    assert config.player_port == 0
+
+
+def test_load_config_from_file(tmp_path: Path) -> None:
+    """Load configuration from TOML file."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("""
+[general]
+player_port = 2
+
+[database]
+path = "/custom/path/moments.db"
+
+[dolphin]
+executable = "/opt/dolphin/dolphin-emu"
+iso_path = "/games/melee.iso"
+""")
+
+    config = load_config(config_path)
+
+    assert config.player_port == 2
+    assert config.db_path == Path("/custom/path/moments.db")
+    assert config.dolphin_executable == Path("/opt/dolphin/dolphin-emu")
+    assert config.iso_path == Path("/games/melee.iso")
+
+
+def test_load_config_missing_file() -> None:
+    """load_config returns defaults when file doesn't exist."""
+    config = load_config(Path("/nonexistent/config.toml"))
+
+    # Should return default config
+    assert config.player_port == 0
+    assert config.db_path == Path("~/.config/slippi-clip/moments.db").expanduser()
+
+
+def test_config_partial_override(tmp_path: Path) -> None:
+    """Config file can override only some values."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("""
+[general]
+player_port = 3
+""")
+
+    config = load_config(config_path)
+
+    # Overridden value
+    assert config.player_port == 3
+    # Default values
+    assert config.db_path == Path("~/.config/slippi-clip/moments.db").expanduser()
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_config.py -v`
+Expected: FAIL with "cannot import name 'Config'"
+
+**Step 3: Write implementation**
+
+```python
+"""Configuration file support for slippi-clip."""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore[import-not-found]
+
+
+@dataclass
+class Config:
+    """Application configuration."""
+
+    # General
+    player_port: int = 0
+
+    # Database
+    db_path: Path = field(
+        default_factory=lambda: Path("~/.config/slippi-clip/moments.db").expanduser()
+    )
+
+    # Dolphin
+    dolphin_executable: Path = field(
+        default_factory=lambda: Path("/usr/bin/dolphin-emu")
+    )
+    dolphin_user_dir: Path | None = field(
+        default_factory=lambda: Path.home() / ".dolphin-slippi"
+    )
+    iso_path: Path | None = None
+
+    # FFmpeg
+    ffmpeg_crf: int = 18
+    ffmpeg_preset: str = "medium"
+
+
+def load_config(config_path: Path) -> Config:
+    """Load configuration from TOML file.
+
+    Args:
+        config_path: Path to config.toml file
+
+    Returns:
+        Config object with values from file (or defaults if file missing)
+    """
+    config = Config()
+
+    if not config_path.exists():
+        return config
+
+    with open(config_path, "rb") as f:
+        data = tomllib.load(f)
+
+    # General section
+    general = data.get("general", {})
+    if "player_port" in general:
+        config.player_port = general["player_port"]
+
+    # Database section
+    database = data.get("database", {})
+    if "path" in database:
+        config.db_path = Path(database["path"])
+
+    # Dolphin section
+    dolphin = data.get("dolphin", {})
+    if "executable" in dolphin:
+        config.dolphin_executable = Path(dolphin["executable"])
+    if "user_dir" in dolphin:
+        config.dolphin_user_dir = Path(dolphin["user_dir"])
+    if "iso_path" in dolphin:
+        config.iso_path = Path(dolphin["iso_path"])
+
+    # FFmpeg section
+    ffmpeg = data.get("ffmpeg", {})
+    if "crf" in ffmpeg:
+        config.ffmpeg_crf = ffmpeg["crf"]
+    if "preset" in ffmpeg:
+        config.ffmpeg_preset = ffmpeg["preset"]
+
+    return config
+
+
+def get_default_config_path() -> Path:
+    """Get the default configuration file path."""
+    return Path("~/.config/slippi-clip/config.toml").expanduser()
+```
+
+**Step 4: Update CLI to use configuration**
+
+Update `src/cli.py` to load config at startup:
+
+```python
+from src.config import load_config, get_default_config_path
+
+
+@click.group()
+@click.version_option(version="0.1.0")
+@click.option(
+    "--config",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to config file",
+)
+@click.pass_context
+def main(ctx: click.Context, config: Path | None) -> None:
+    """Slippi-clip: Scan replays for moments and capture video clips."""
+    ctx.ensure_object(dict)
+
+    config_path = config or get_default_config_path()
+    ctx.obj["config"] = load_config(config_path)
+
+
+@main.command()
+@click.argument("replay_dir", type=click.Path(exists=True, path_type=Path))
+@click.option("--full-rescan", is_flag=True, help="Re-scan all files, ignoring cache")
+@click.option("--db", type=click.Path(path_type=Path), default=None, help="Database path")
+@click.option("--player-port", type=int, default=None, help="Player port (0-3)")
+@click.pass_context
+def scan(
+    ctx: click.Context,
+    replay_dir: Path,
+    full_rescan: bool,
+    db: Path | None,
+    player_port: int | None,
+) -> None:
+    """Scan replay directory for moments."""
+    config = ctx.obj["config"]
+
+    # Use CLI args or fall back to config
+    db_path = db or config.db_path
+    port = player_port if player_port is not None else config.player_port
+
+    # ... rest of scan implementation
+```
+
+**Step 5: Run tests to verify they pass**
+
+Run: `pytest tests/test_config.py tests/test_cli.py -v`
+Expected: PASS
+
+**Step 6: Commit**
+
+```bash
+git add src/config.py src/cli.py tests/test_config.py
+git commit -m "feat: add configuration file support"
+```
 
 ---
 

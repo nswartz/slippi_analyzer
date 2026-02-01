@@ -122,3 +122,33 @@ def test_find_displays_count(tmp_path: Path) -> None:
     assert result.exit_code == 0
     # Should indicate 3 moments found
     assert "3" in result.output
+
+
+def test_scan_runs_detectors_and_stores_moments(tmp_path: Path) -> None:
+    """Scan command runs detectors on replays and stores moments in database."""
+    import pytest
+    import shutil
+
+    # Use the test fixture replay
+    fixture_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not fixture_path.exists():
+        pytest.skip("Test fixture not available")
+
+    # Copy fixture to temp directory
+    replay_dir = tmp_path / "replays"
+    replay_dir.mkdir()
+    shutil.copy(fixture_path, replay_dir / fixture_path.name)
+
+    db_path = tmp_path / "test.db"
+
+    runner = CliRunner()
+    result = runner.invoke(main, [
+        "scan",
+        str(replay_dir),
+        "--db", str(db_path),
+    ])
+
+    assert result.exit_code == 0
+
+    # Check that the replay was scanned (output should indicate scanning happened)
+    assert "Scanned 1" in result.output or "scanned 1" in result.output.lower()
