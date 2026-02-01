@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from src.capture.compile import compile_clips as compile_clips_fn
+from src.capture.dolphin import DolphinConfig
 from src.capture.pipeline import CapturePipeline
 from src.config import Config, get_default_config_path, load_config
 from src.database import MomentDatabase
@@ -190,7 +191,14 @@ def capture(ctx: click.Context, tag: tuple[str, ...], output: Path, db: Path | N
 
     click.echo(f"Capturing {len(all_moments)} clips to {output_dir}")
 
-    pipeline = CapturePipeline(output_dir=output_dir)
+    # Create DolphinConfig from loaded config
+    dolphin_config = DolphinConfig(
+        executable=cfg.dolphin_executable,
+        user_dir=cfg.dolphin_user_dir,
+        iso_path=cfg.iso_path,
+    )
+
+    pipeline = CapturePipeline(output_dir=output_dir, dolphin_config=dolphin_config)
     results = pipeline.capture_moments(all_moments)
 
     click.echo(f"Captured {len(results)} clips")

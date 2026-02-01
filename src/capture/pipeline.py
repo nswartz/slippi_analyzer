@@ -43,10 +43,12 @@ class CapturePipeline:
             frame_dir = Path(temp_dir) / "frames"
             frame_dir.mkdir()
 
-            # Start Dolphin capture
+            # Start Dolphin capture for the specific frame range
             self._dolphin.start_capture(
                 replay_path=moment.replay_path,
                 output_dir=frame_dir,
+                start_frame=moment.frame_start,
+                end_frame=moment.frame_end,
             )
 
             # Wait for capture to complete
