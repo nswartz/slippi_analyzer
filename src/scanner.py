@@ -10,6 +10,64 @@ from src.detectors.registry import DetectorRegistry
 from src.models import TaggedMoment
 
 
+def normalize_connect_code(code: str) -> str:
+    """Normalize connect code to uppercase with hash separator.
+
+    Accepts both dash (-) and hash (#) separators, returns hash format.
+    Examples: "PDL-637" -> "PDL#637", "pdl#637" -> "PDL#637"
+    """
+    return code.upper().replace("-", "#")
+
+
+def find_player_port_by_code(replay_path: Path, code: str) -> int | None:
+    """Find the port index of a player by their connect code.
+
+    Args:
+        replay_path: Path to the .slp replay file
+        code: Connect code (e.g., "PDL-637" or "PDL#637")
+
+    Returns:
+        Port index (0-3) if found, None otherwise
+    """
+    game = Game(replay_path)
+
+    if game.metadata is None or game.metadata.players is None:
+        return None
+
+    normalized_code = normalize_connect_code(code)
+
+    for port_idx, player in enumerate(game.metadata.players):
+        if player is None:
+            continue
+        if player.netplay is None:
+            continue
+        if player.netplay.code is None:
+            continue
+        if normalize_connect_code(player.netplay.code) == normalized_code:
+            return port_idx
+
+    return None
+
+
+def find_player_port_by_codes(replay_path: Path, codes: list[str]) -> int | None:
+    """Find the port index of a player by any of their connect codes.
+
+    Useful when a player may use multiple codes (e.g., main and alt).
+
+    Args:
+        replay_path: Path to the .slp replay file
+        codes: List of connect codes to check
+
+    Returns:
+        Port index (0-3) if any code matches, None otherwise
+    """
+    for code in codes:
+        port = find_player_port_by_code(replay_path, code)
+        if port is not None:
+            return port
+    return None
+
+
 # Map stage IDs to readable names (lowercase, no spaces)
 STAGE_NAMES: dict[int, str] = {
     2: "fountain",

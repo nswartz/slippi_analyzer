@@ -59,3 +59,54 @@ player_port = 3
     assert config.player_port == 3
     # Default values
     assert config.db_path == Path("~/.config/slippi-clip/moments.db").expanduser()
+
+
+def test_config_player_tags_default() -> None:
+    """Config has empty player_tags by default."""
+    config = Config()
+
+    assert config.player_tags == []
+
+
+def test_load_config_player_tags(tmp_path: Path) -> None:
+    """Load player_tags from config file."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("""
+[general]
+player_tags = ["PDL-637", "PIE-381"]
+""")
+
+    config = load_config(config_path)
+
+    assert config.player_tags == ["PDL-637", "PIE-381"]
+
+
+def test_config_player_tags_with_port_fallback(tmp_path: Path) -> None:
+    """When player_tags is set, player_port can still be used as fallback."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("""
+[general]
+player_port = 1
+player_tags = ["PDL-637"]
+""")
+
+    config = load_config(config_path)
+
+    # Both are set - tags take precedence in scanning logic
+    assert config.player_tags == ["PDL-637"]
+    assert config.player_port == 1
+
+
+def test_load_config_expands_tilde_in_paths(tmp_path: Path) -> None:
+    """Database path with ~ should be expanded to user home."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("""
+[database]
+path = "~/.config/slippi-clip/moments.db"
+""")
+
+    config = load_config(config_path)
+
+    # Tilde should be expanded
+    assert "~" not in str(config.db_path)
+    assert str(config.db_path).startswith(str(Path.home()))

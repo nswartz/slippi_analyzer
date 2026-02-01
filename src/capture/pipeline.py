@@ -56,15 +56,19 @@ class CapturePipeline:
             if return_code != 0:
                 return None
 
+            # Find Dolphin's output files
+            video_file = frame_dir / "framedump0.avi"
+            audio_file = frame_dir / "dspdump.wav"
+
             # Generate output filename
             filename = generate_clip_filename(moment, index)
             output_path = self.output_dir / filename
 
-            # Encode frames to video
-            self._ffmpeg.encode(
-                frame_dir=frame_dir,
+            # Encode AVI+WAV to MP4
+            self._ffmpeg.encode_avi(
+                video_file=video_file,
                 output_file=output_path,
-                fps=60,
+                audio_file=audio_file if audio_file.exists() else None,
             )
 
             # Write sidecar metadata file

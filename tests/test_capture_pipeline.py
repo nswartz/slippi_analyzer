@@ -36,8 +36,8 @@ def test_pipeline_captures_single_moment(tmp_path: Path) -> None:
         # Verify Dolphin was called
         mock_dolphin_instance.start_capture.assert_called_once()
 
-        # Verify FFmpeg was called
-        mock_ffmpeg_instance.encode.assert_called_once()
+        # Verify FFmpeg was called to encode AVI to MP4
+        mock_ffmpeg_instance.encode_avi.assert_called_once()
 
         # Should return output path
         assert result is not None
@@ -106,4 +106,4 @@ def test_pipeline_handles_dolphin_failure(tmp_path: Path) -> None:
         # Should return None on failure
         assert result is None
         # FFmpeg should not be called if Dolphin fails
-        mock_ffmpeg_instance.encode.assert_not_called()
+        mock_ffmpeg_instance.encode_avi.assert_not_called()

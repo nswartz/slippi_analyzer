@@ -62,3 +62,66 @@ def test_ffmpeg_encoder_encode(tmp_path: Path) -> None:
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert "ffmpeg" in call_args[0]
+
+
+def test_build_avi_encode_command() -> None:
+    """Build ffmpeg command for encoding AVI+WAV to MP4."""
+    from src.capture.ffmpeg import build_avi_encode_command
+
+    cmd = build_avi_encode_command(
+        video_file=Path("/tmp/framedump0.avi"),
+        audio_file=Path("/tmp/dspdump.wav"),
+        output_file=Path("/output/clip.mp4"),
+    )
+
+    assert "ffmpeg" in cmd[0]
+    assert "-i" in cmd
+    assert str(Path("/tmp/framedump0.avi")) in cmd
+    assert str(Path("/tmp/dspdump.wav")) in cmd
+    assert "-c:v" in cmd
+    assert "libopenh264" in cmd
+    assert "-c:a" in cmd
+    assert "aac" in cmd
+    assert str(Path("/output/clip.mp4")) in cmd
+
+
+def test_build_avi_encode_command_no_audio() -> None:
+    """Build ffmpeg command for encoding AVI to MP4 without audio."""
+    from src.capture.ffmpeg import build_avi_encode_command
+
+    cmd = build_avi_encode_command(
+        video_file=Path("/tmp/framedump0.avi"),
+        audio_file=None,
+        output_file=Path("/output/clip.mp4"),
+    )
+
+    # Should only have one -i (for video)
+    assert cmd.count("-i") == 1
+    assert "-c:a" not in cmd
+
+
+def test_ffmpeg_encoder_encode_avi(tmp_path: Path) -> None:
+    """FFmpegEncoder.encode_avi calls subprocess with correct command."""
+    encoder = FFmpegEncoder()
+
+    video_file = tmp_path / "framedump0.avi"
+    audio_file = tmp_path / "dspdump.wav"
+    video_file.touch()
+    audio_file.touch()
+
+    output_file = tmp_path / "output.mp4"
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+
+        encoder.encode_avi(
+            video_file=video_file,
+            audio_file=audio_file,
+            output_file=output_file,
+        )
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "ffmpeg" in call_args[0]
+        assert str(video_file) in call_args
+        assert str(audio_file) in call_args

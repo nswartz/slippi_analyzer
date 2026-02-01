@@ -16,6 +16,7 @@ class Config:
 
     # General
     player_port: int = 0
+    player_tags: list[str] = field(default_factory=lambda: [])
 
     # Database
     db_path: Path = field(
@@ -57,11 +58,15 @@ def load_config(config_path: Path) -> Config:
     general = cast(dict[str, Any], data.get("general", {}))
     if "player_port" in general:
         config.player_port = int(general["player_port"])
+    if "player_tags" in general:
+        tags = general["player_tags"]
+        if isinstance(tags, list):
+            config.player_tags = [str(t) for t in cast(list[Any], tags)]
 
     # Database section
     database = cast(dict[str, Any], data.get("database", {}))
     if "path" in database:
-        config.db_path = Path(str(database["path"]))
+        config.db_path = Path(str(database["path"])).expanduser()
 
     # Dolphin section
     dolphin = cast(dict[str, Any], data.get("dolphin", {}))

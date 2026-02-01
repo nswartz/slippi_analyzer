@@ -152,3 +152,42 @@ def test_scan_runs_detectors_and_stores_moments(tmp_path: Path) -> None:
 
     # Check that the replay was scanned (output should indicate scanning happened)
     assert "Scanned 1" in result.output or "scanned 1" in result.output.lower()
+
+
+def test_scan_accepts_player_tag_option() -> None:
+    """Scan command accepts --player-tag option."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["scan", "--help"])
+
+    assert result.exit_code == 0
+    assert "--player-tag" in result.output
+
+
+def test_scan_with_player_tags_finds_correct_player(tmp_path: Path) -> None:
+    """Scan command uses player tags to identify the player."""
+    import pytest
+    import shutil
+
+    # Use the test fixture replay
+    fixture_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not fixture_path.exists():
+        pytest.skip("Test fixture not available")
+
+    # Copy fixture to temp directory
+    replay_dir = tmp_path / "replays"
+    replay_dir.mkdir()
+    shutil.copy(fixture_path, replay_dir / fixture_path.name)
+
+    db_path = tmp_path / "test.db"
+
+    runner = CliRunner()
+    # PDL#637 is at port 0 in the test fixture
+    result = runner.invoke(main, [
+        "scan",
+        str(replay_dir),
+        "--db", str(db_path),
+        "--player-tag", "PDL-637",
+    ])
+
+    assert result.exit_code == 0
+    assert "Scanned 1" in result.output or "scanned 1" in result.output.lower()

@@ -3,6 +3,7 @@
 import configparser
 import json
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -182,18 +183,56 @@ class DolphinController:
             output_dir=output_dir,
         )
 
-        self._process = subprocess.Popen(cmd)
+        self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
 
     def wait_for_completion(self, timeout: float | None = None) -> int:
         """Wait for Dolphin to finish capturing.
 
+        Monitors stdout for frame progress and terminates Dolphin when complete.
+
         Returns:
-            Return code from Dolphin process
+            Return code from Dolphin process (0 on success)
         """
         if self._process is None:
             raise RuntimeError("No capture in progress")
 
-        return self._process.wait(timeout=timeout)
+        game_end_frame = -124
+        current_frame = -125
+
+        # Read stdout to track frame progress
+        while self._process.poll() is None:
+            if self._process.stdout is None:
+                break
+
+            line = self._process.stdout.readline()
+            if not line:
+                break
+
+            line = line.strip()
+
+            if line.startswith("[GAME_END_FRAME] "):
+                game_end_frame = int(line.removeprefix("[GAME_END_FRAME] "))
+            elif line.startswith("[CURRENT_FRAME] "):
+                current_frame = int(line.removeprefix("[CURRENT_FRAME] "))
+
+            # Check if playback is complete
+            if current_frame >= game_end_frame and game_end_frame > 0:
+                break
+
+        # Give Dolphin time to finish writing files
+        time.sleep(2)
+
+        # Terminate Dolphin
+        self._process.terminate()
+        try:
+            self._process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+            self._process.wait()
+
+        return_code = self._process.returncode
+        self._process = None
+        return return_code if return_code is not None else 0
 
     def stop(self) -> None:
         """Stop Dolphin capture."""

@@ -11,7 +11,7 @@ from src.config import Config, get_default_config_path, load_config
 from src.database import MomentDatabase
 from src.detectors.registry import DetectorRegistry
 from src.models import TaggedMoment
-from src.scanner import ReplayScanner
+from src.scanner import ReplayScanner, find_player_port_by_codes
 
 
 @click.group()
@@ -46,6 +46,11 @@ def main(ctx: click.Context, config: Path | None) -> None:
     default=None,
     help="Player port index (0-3)",
 )
+@click.option(
+    "--player-tag",
+    multiple=True,
+    help="Player connect code (e.g., PDL-637 or PDL#637). Can be specified multiple times.",
+)
 @click.pass_context
 def scan(
     ctx: click.Context,
@@ -53,19 +58,27 @@ def scan(
     full_rescan: bool,
     db: Path | None,
     player_port: int | None,
+    player_tag: tuple[str, ...],
 ) -> None:
     """Scan replay directory for moments."""
     cfg: Config = ctx.obj["config"]
 
     # Use CLI args or fall back to config
     db_path = db or cfg.db_path
-    port = player_port if player_port is not None else cfg.player_port
+    fallback_port = player_port if player_port is not None else cfg.player_port
+
+    # Collect player tags from CLI args or config
+    tags: list[str] = list(player_tag) if player_tag else cfg.player_tags
 
     # Ensure parent directory exists
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Scanning {replay_dir}...")
     click.echo(f"Database: {db_path}")
+    if tags:
+        click.echo(f"Player tags: {', '.join(tags)}")
+    else:
+        click.echo(f"Player port: {fallback_port}")
 
     # Initialize database
     database = MomentDatabase(db_path)
@@ -85,6 +98,7 @@ def scan(
     # Scan each replay
     scanned_count = 0
     total_moments = 0
+    skipped_no_player = 0
 
     for replay_path in replay_files:
         mtime = replay_path.stat().st_mtime
@@ -92,6 +106,16 @@ def scan(
         # Skip if already scanned (unless full rescan)
         if not full_rescan and not database.needs_scan(replay_path, mtime):
             continue
+
+        # Determine player port - try connect codes first, then fallback to port
+        if tags:
+            port = find_player_port_by_codes(replay_path, tags)
+            if port is None:
+                # Player not in this replay, skip it
+                skipped_no_player += 1
+                continue
+        else:
+            port = fallback_port
 
         try:
             moments = scanner.scan_replay(
@@ -110,6 +134,8 @@ def scan(
             click.echo(f"  Error scanning {replay_path.name}: {e}", err=True)
 
     click.echo(f"Scanned {scanned_count} replays, found {total_moments} moments")
+    if skipped_no_player > 0:
+        click.echo(f"Skipped {skipped_no_player} replays (player not found)")
 
 
 @main.command()

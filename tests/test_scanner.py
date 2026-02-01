@@ -173,3 +173,79 @@ def test_replay_scanner_scan_replay_adds_metadata(tmp_path: Path) -> None:
     assert "stage" in moment.metadata
     assert "player" in moment.metadata
     assert "opponent" in moment.metadata
+
+
+def test_normalize_connect_code_handles_dash() -> None:
+    """normalize_connect_code converts dash format to hash format."""
+    from src.scanner import normalize_connect_code
+
+    assert normalize_connect_code("PDL-637") == "PDL#637"
+    assert normalize_connect_code("PIE-381") == "PIE#381"
+
+
+def test_normalize_connect_code_handles_hash() -> None:
+    """normalize_connect_code leaves hash format unchanged."""
+    from src.scanner import normalize_connect_code
+
+    assert normalize_connect_code("PDL#637") == "PDL#637"
+    assert normalize_connect_code("PIE#381") == "PIE#381"
+
+
+def test_normalize_connect_code_case_insensitive() -> None:
+    """normalize_connect_code normalizes to uppercase."""
+    from src.scanner import normalize_connect_code
+
+    assert normalize_connect_code("pdl-637") == "PDL#637"
+    assert normalize_connect_code("PDL-637") == "PDL#637"
+
+
+def test_find_player_port_by_code() -> None:
+    """find_player_port_by_code finds correct port for connect code."""
+    from src.scanner import find_player_port_by_code
+
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    # Port 0 = PDL#637 (PhoenixDarkLord)
+    assert find_player_port_by_code(replay_path, "PDL#637") == 0
+    assert find_player_port_by_code(replay_path, "PDL-637") == 0  # Dash format
+    assert find_player_port_by_code(replay_path, "pdl-637") == 0  # Case insensitive
+
+    # Port 1 = ADMI#105
+    assert find_player_port_by_code(replay_path, "ADMI#105") == 1
+
+    # Port 2 = JEEF#676
+    assert find_player_port_by_code(replay_path, "JEEF#676") == 2
+
+    # Port 3 = HAMM#587
+    assert find_player_port_by_code(replay_path, "HAMM#587") == 3
+
+
+def test_find_player_port_by_code_returns_none_for_unknown() -> None:
+    """find_player_port_by_code returns None for unknown code."""
+    from src.scanner import find_player_port_by_code
+
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    assert find_player_port_by_code(replay_path, "UNKNOWN#999") is None
+
+
+def test_find_player_port_by_codes_list() -> None:
+    """find_player_port_by_codes finds first matching code from list."""
+    from src.scanner import find_player_port_by_codes
+
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    # User has PDL-637 and PIE-381, but only PDL-637 is in this replay
+    assert find_player_port_by_codes(replay_path, ["PDL-637", "PIE-381"]) == 0
+
+    # Test with codes in opposite order
+    assert find_player_port_by_codes(replay_path, ["PIE-381", "PDL-637"]) == 0
+
+    # Test when no codes match
+    assert find_player_port_by_codes(replay_path, ["UNKNOWN#999"]) is None
