@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from src.database import MomentDatabase
 from src.detectors.base import FrameData
 from src.detectors.registry import DetectorRegistry
 from src.models import TaggedMoment
@@ -27,7 +26,7 @@ def test_parse_replay_returns_frame_data_list() -> None:
     assert len(result) >= 1  # At least one opponent
 
     # Each opponent's frames should be a list of FrameData
-    for opponent_port, frames in result.items():
+    for _, frames in result.items():
         assert isinstance(frames, list)
         assert len(frames) > 0
         assert isinstance(frames[0], FrameData)

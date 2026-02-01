@@ -37,6 +37,12 @@
 
 - There are other skills with updated instructions in v4.1.2, but it is not available yet.
 
+## Code Quality
+
+- ALWAYS remove unused imports after refactoring or when pyright reports them
+- Run `.venv/bin/pyright src/` before committing to catch type errors and unused imports
+- The project uses `typeCheckingMode = "strict"` - all code must pass strict type checking
+
 ## Testing
 
 - REQUIRED: Use `superpowers:test-driven-development` skill for all implementation work

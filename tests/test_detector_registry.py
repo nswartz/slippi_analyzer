@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.detectors.base import Detector, FrameData
+from src.detectors.base import FrameData
 from src.detectors.registry import DetectorRegistry
 from src.models import TaggedMoment
 
