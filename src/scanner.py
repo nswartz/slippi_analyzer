@@ -6,6 +6,8 @@ from slippi import Game
 from slippi.id import CSSCharacter
 
 from src.detectors.base import FrameData
+from src.detectors.registry import DetectorRegistry
+from src.models import TaggedMoment
 
 
 # Map stage IDs to readable names (lowercase, no spaces)
@@ -191,3 +193,45 @@ class ReplayScanner:
         if player is None:
             return "unknown"
         return get_character_name(player.character)
+
+    def scan_replay(
+        self,
+        replay_path: Path,
+        player_port: int,
+        registry: DetectorRegistry,
+    ) -> list[TaggedMoment]:
+        """Scan a replay for moments using all registered detectors.
+
+        Parses the replay, runs all detectors, and enriches moments with metadata.
+
+        Args:
+            replay_path: Path to the .slp file
+            player_port: Port index of the player (0-3)
+            registry: DetectorRegistry with detectors to run
+
+        Returns:
+            List of detected moments with metadata filled in
+        """
+        # Get base metadata
+        metadata = self.get_metadata(replay_path)
+
+        # Parse replay to frames for each opponent
+        frames_by_opponent = parse_replay_to_frames(replay_path, player_port)
+
+        all_moments: list[TaggedMoment] = []
+
+        # Run detectors for each opponent
+        for opponent_port, frames in frames_by_opponent.items():
+            opponent_char = self.get_opponent_character(replay_path, opponent_port)
+
+            # Run all detectors
+            moments = registry.run_all(frames, replay_path)
+
+            # Enrich moments with metadata
+            for moment in moments:
+                moment.metadata.update(metadata)
+                moment.metadata["opponent"] = opponent_char
+
+            all_moments.extend(moments)
+
+        return all_moments

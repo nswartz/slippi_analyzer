@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from src.database import MomentDatabase
+from src.models import TaggedMoment
 
 
 @click.group()
@@ -57,13 +58,37 @@ def scan(replay_dir: Path, full_rescan: bool, db: Path) -> None:
 )
 def find(tag: tuple[str, ...], opponent: str | None, db: Path) -> None:
     """Find moments matching criteria."""
-    click.echo(f"Finding moments in {db}")
+    database = MomentDatabase(db)
+
+    # Find moments by tag
+    all_moments: list[TaggedMoment] = []
     if tag:
-        click.echo(f"Tags: {', '.join(tag)}")
+        for t in tag:
+            moments = database.find_moments_by_tag(t)
+            all_moments.extend(moments)
+    else:
+        click.echo("No tag specified. Use --tag to filter moments.")
+        return
+
+    # Filter by opponent if specified
     if opponent:
-        click.echo(f"Opponent: {opponent}")
-    # TODO: Implement query logic
-    click.echo("Find complete (not implemented yet)")
+        all_moments = [
+            m for m in all_moments
+            if m.metadata.get("opponent", "").lower() == opponent.lower()
+        ]
+
+    click.echo(f"Found {len(all_moments)} moments")
+
+    # Display results
+    for moment in all_moments:
+        replay_name = moment.replay_path.name
+        opp = moment.metadata.get("opponent", "unknown")
+        stage = moment.metadata.get("stage", "unknown")
+        tags_str = ", ".join(moment.tags)
+        click.echo(
+            f"  {replay_name}: frames {moment.frame_start}-{moment.frame_end} "
+            f"vs {opp} on {stage} [{tags_str}]"
+        )
 
 
 @main.command()

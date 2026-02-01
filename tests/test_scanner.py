@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from src.database import MomentDatabase
 from src.detectors.base import FrameData
+from src.detectors.registry import DetectorRegistry
+from src.models import TaggedMoment
 from src.scanner import ReplayScanner, parse_replay_to_frames
 
 
@@ -103,3 +106,71 @@ def test_replay_scanner_identifies_teammates_vs_opponents() -> None:
     assert 0 not in opponents  # Self is not an opponent
     assert 1 not in opponents  # Teammate is not an opponent
     assert 2 in opponents or 3 in opponents  # At least one opponent identified
+
+
+def test_replay_scanner_scan_replay_runs_detectors(tmp_path: Path) -> None:
+    """ReplayScanner.scan_replay runs detectors and returns moments."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    scanner = ReplayScanner()
+    registry = DetectorRegistry.with_default_detectors()
+
+    # Scan the replay
+    moments = scanner.scan_replay(
+        replay_path=replay_path,
+        player_port=0,
+        registry=registry,
+    )
+
+    # Should return a list of moments (may be empty if no ledgehogs in this replay)
+    assert isinstance(moments, list)
+    for moment in moments:
+        assert isinstance(moment, TaggedMoment)
+
+
+def test_replay_scanner_scan_replay_adds_metadata(tmp_path: Path) -> None:
+    """ReplayScanner.scan_replay adds replay metadata to moments."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    # Create a mock detector that always returns a moment
+    class AlwaysDetectMock:
+        @property
+        def name(self) -> str:
+            return "always"
+
+        def detect(
+            self, frames: list[FrameData], replay_path: Path
+        ) -> list[TaggedMoment]:
+            if frames:
+                return [
+                    TaggedMoment(
+                        replay_path=replay_path,
+                        frame_start=0,
+                        frame_end=100,
+                        tags=["test:always"],
+                        metadata={},
+                    )
+                ]
+            return []
+
+    scanner = ReplayScanner()
+    registry = DetectorRegistry()
+    registry.register(AlwaysDetectMock())
+
+    moments = scanner.scan_replay(
+        replay_path=replay_path,
+        player_port=0,
+        registry=registry,
+    )
+
+    # Should have moments with metadata filled in
+    assert len(moments) >= 1
+    moment = moments[0]
+    assert "date" in moment.metadata
+    assert "stage" in moment.metadata
+    assert "player" in moment.metadata
+    assert "opponent" in moment.metadata
