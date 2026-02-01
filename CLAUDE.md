@@ -6,6 +6,13 @@
 - Installing from existing lockfiles/manifests (npm install, pip install from pyproject.toml) is fine
 - NEVER run system-level installs (dnf, apt, brew, etc.) without asking the user first
 
+## Python Environment
+
+- ALWAYS use the project's virtual environment (`.venv/`) for Python operations
+- Run Python commands via `.venv/bin/python` or `.venv/bin/<tool>` (e.g., `.venv/bin/pytest`)
+- NEVER use `uv` or other global package managers - keep dependencies isolated in the venv
+- This is analogous to always using git worktrees: isolation prevents contamination of global/project state
+
 ## Git Workflow
 
 - There is an issue in superpowers 4.1.1 where the skills arent being run correctly. Make sure the brainstorming skill includes the following:

@@ -11,8 +11,8 @@ class TaggedMoment:
     replay_path: Path
     frame_start: int
     frame_end: int
-    tags: list[str] = field(default_factory=list)
-    metadata: dict[str, str] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=lambda: [])
+    metadata: dict[str, str] = field(default_factory=lambda: {})
 
     @property
     def frame_count(self) -> int:

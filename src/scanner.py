@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from slippi import Game
-from slippi.id import CSSCharacter, Stage
+from slippi.id import CSSCharacter
 
 from src.detectors.base import FrameData
 
@@ -19,13 +19,8 @@ STAGE_NAMES: dict[int, str] = {
 }
 
 
-def get_character_name(char: CSSCharacter | int) -> str:
-    """Get lowercase character name from CSS character enum or int."""
-    if isinstance(char, int):
-        try:
-            char = CSSCharacter(char)
-        except ValueError:
-            return "unknown"
+def get_character_name(char: CSSCharacter) -> str:
+    """Get lowercase character name from CSS character enum."""
     return char.name.lower().replace("_", "")
 
 
@@ -47,10 +42,11 @@ def parse_replay_to_frames(
     """
     game = Game(replay_path)
 
+    if game.start is None:
+        raise ValueError(f"Replay has no start data: {replay_path}")
+
     # Determine stage
-    stage_id = game.start.stage
-    if isinstance(stage_id, Stage):
-        stage_id = stage_id.value
+    stage_id = game.start.stage.value
 
     # Get player's team (if teams mode)
     player_info = game.start.players[player_port]
@@ -91,11 +87,13 @@ def parse_replay_to_frames(
             # Skip if either port has no data
             if player_port_data is None or opp_port_data is None:
                 continue
-            if player_port_data.leader is None or opp_port_data.leader is None:
-                continue
 
             player_post = player_port_data.leader.post
             opp_post = opp_port_data.leader.post
+
+            # Skip if post-frame data not available
+            if player_post is None or opp_post is None:
+                continue
 
             frames.append(
                 FrameData(
@@ -129,21 +127,21 @@ class ReplayScanner:
 
         # Date
         date_str = "unknown"
-        if game.metadata.date:
+        if game.metadata is not None and game.metadata.date is not None:
             date_str = game.metadata.date.strftime("%Y-%m-%d")
 
         # Stage
-        stage_id = game.start.stage
-        if isinstance(stage_id, Stage):
-            stage_id = stage_id.value
-        stage_name = STAGE_NAMES.get(stage_id, "unknown")
-
-        # Find first human player's character (assume port 0 for now)
+        stage_name = "unknown"
         player_char = "unknown"
-        for player in game.start.players:
-            if player is not None:
-                player_char = get_character_name(player.character)
-                break
+        if game.start is not None:
+            stage_id = game.start.stage.value
+            stage_name = STAGE_NAMES.get(stage_id, "unknown")
+
+            # Find first human player's character (assume port 0 for now)
+            for player in game.start.players:
+                if player is not None:
+                    player_char = get_character_name(player.character)
+                    break
 
         return {
             "date": date_str,
@@ -158,6 +156,9 @@ class ReplayScanner:
         In doubles, returns only ports on opposing team.
         """
         game = Game(replay_path)
+
+        if game.start is None:
+            return []
 
         player_info = game.start.players[player_port]
         if player_info is None:
@@ -184,6 +185,8 @@ class ReplayScanner:
     ) -> str:
         """Get the character name for an opponent port."""
         game = Game(replay_path)
+        if game.start is None:
+            return "unknown"
         player = game.start.players[opponent_port]
         if player is None:
             return "unknown"

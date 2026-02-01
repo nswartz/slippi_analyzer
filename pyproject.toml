@@ -20,3 +20,4 @@ slippi-clip = "src.cli:main"
 [tool.pyright]
 pythonVersion = "3.10"
 typeCheckingMode = "strict"
+stubPath = "src/stubs"
