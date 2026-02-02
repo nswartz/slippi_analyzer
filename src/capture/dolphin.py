@@ -18,6 +18,7 @@ class DolphinConfig:
         default_factory=lambda: Path.home() / ".dolphin-slippi"
     )
     iso_path: Path | None = None
+    headless: bool = False  # Run via xvfb with no audio playback
 
 
 def build_dolphin_command(
@@ -35,7 +36,13 @@ def build_dolphin_command(
     Returns:
         Command as list of strings
     """
-    cmd = [str(config.executable)]
+    cmd: list[str] = []
+
+    # Wrap with xvfb-run for headless mode (no window focus stealing)
+    if config.headless:
+        cmd.extend(["xvfb-run", "-a"])
+
+    cmd.append(str(config.executable))
 
     if config.user_dir:
         cmd.extend(["-u", str(config.user_dir)])
@@ -142,6 +149,10 @@ class DolphinController:
             dolphin_config["DSP"] = {}
         dolphin_config["DSP"]["DumpAudio"] = "True"
         dolphin_config["DSP"]["DumpAudioSilent"] = "True"
+
+        # Disable audio playback in headless mode (still dumps audio to file)
+        if self.config.headless:
+            dolphin_config["DSP"]["Backend"] = "No audio"
 
         with open(dolphin_ini_path, "w") as f:
             dolphin_config.write(f)

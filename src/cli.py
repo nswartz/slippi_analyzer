@@ -204,8 +204,26 @@ def get_default_clips_path() -> Path:
     default=None,
     help="Database path",
 )
+@click.option(
+    "--limit",
+    type=int,
+    default=None,
+    help="Maximum number of clips to capture (for testing)",
+)
+@click.option(
+    "--headless",
+    is_flag=True,
+    help="Run Dolphin headless (no window focus, no audio playback)",
+)
 @click.pass_context
-def capture(ctx: click.Context, tag: tuple[str, ...], output: Path | None, db: Path | None) -> None:
+def capture(
+    ctx: click.Context,
+    tag: tuple[str, ...],
+    output: Path | None,
+    db: Path | None,
+    limit: int | None,
+    headless: bool,
+) -> None:
     """Capture video clips for matching moments."""
     cfg: Config = ctx.obj["config"]
     db_path = db or cfg.db_path
@@ -221,6 +239,11 @@ def capture(ctx: click.Context, tag: tuple[str, ...], output: Path | None, db: P
         click.echo("No moments found matching the specified tags.")
         return
 
+    # Apply limit if specified
+    if limit is not None and limit < len(all_moments):
+        click.echo(f"Limiting to {limit} clips (of {len(all_moments)} total)")
+        all_moments = all_moments[:limit]
+
     # Use specified output or default
     output_dir = output or get_default_clips_path()
 
@@ -231,6 +254,7 @@ def capture(ctx: click.Context, tag: tuple[str, ...], output: Path | None, db: P
         executable=cfg.dolphin_executable,
         user_dir=cfg.dolphin_user_dir,
         iso_path=cfg.iso_path,
+        headless=headless,
     )
 
     pipeline = CapturePipeline(output_dir=output_dir, dolphin_config=dolphin_config)
