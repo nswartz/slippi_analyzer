@@ -1,5 +1,7 @@
 """Replay scanner for parsing .slp files to FrameData."""
 
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from slippi import Game
@@ -296,3 +298,52 @@ class ReplayScanner:
             all_moments.extend(moments)
 
         return all_moments
+
+    def scan_replays_parallel(
+        self,
+        replay_paths: list[Path],
+        player_port: int,
+        registry: DetectorRegistry,
+        max_workers: int = 4,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> list[list[TaggedMoment]]:
+        """Scan multiple replays in parallel using thread pool.
+
+        Args:
+            replay_paths: List of .slp file paths to scan
+            player_port: Player port index (0-3)
+            registry: DetectorRegistry with detectors to run
+            max_workers: Number of parallel workers (default 4)
+            progress_callback: Optional callback(completed, total) for progress
+
+        Returns:
+            List of moment lists, one per replay (preserves ordering by path)
+        """
+        results: list[list[TaggedMoment]] = [[] for _ in replay_paths]
+        completed = 0
+        total = len(replay_paths)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks with their index for ordering
+            future_to_idx = {
+                executor.submit(
+                    self.scan_replay, path, player_port, registry
+                ): idx
+                for idx, path in enumerate(replay_paths)
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    moments = future.result()
+                    results[idx] = moments
+                except Exception as e:
+                    # Log error but continue with other replays
+                    print(f"Error scanning {replay_paths[idx]}: {e}")
+
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, total)
+
+        return results

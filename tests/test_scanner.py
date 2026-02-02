@@ -250,3 +250,33 @@ def test_find_player_port_by_codes_list() -> None:
 
     # Test when no codes match
     assert find_player_port_by_codes(replay_path, ["UNKNOWN#999"]) is None
+
+
+def test_scan_replays_parallel_faster_than_sequential() -> None:
+    """Parallel scanning should be faster for multiple replays."""
+    import time
+    from unittest.mock import patch
+
+    scanner = ReplayScanner()
+
+    # Mock slow replay scanning (100ms each)
+    def slow_scan(
+        path: Path, player_port: int, registry: DetectorRegistry
+    ) -> list[TaggedMoment]:
+        time.sleep(0.1)
+        return []
+
+    with patch.object(scanner, "scan_replay", side_effect=slow_scan):
+        paths = [Path(f"/fake/replay_{i}.slp") for i in range(10)]
+        registry = DetectorRegistry()
+
+        # Sequential would take 10 * 0.1 = 1 second
+        # Parallel with 4 workers should take ~0.3 seconds
+        start = time.time()
+        results = scanner.scan_replays_parallel(
+            paths, player_port=0, registry=registry, max_workers=4
+        )
+        elapsed = time.time() - start
+
+        assert elapsed < 0.5  # Should be much faster than 1 second
+        assert len(results) == 10  # Should have 10 result lists (one per replay)
