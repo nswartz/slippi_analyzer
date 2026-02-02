@@ -18,7 +18,7 @@ class DolphinConfig:
         default_factory=lambda: Path.home() / ".dolphin-slippi"
     )
     iso_path: Path | None = None
-    headless: bool = False  # Run via xvfb with no audio playback
+    mute_music: bool = True  # Mute in-game music (keeps SFX) for video editing
 
 
 def build_dolphin_command(
@@ -36,13 +36,7 @@ def build_dolphin_command(
     Returns:
         Command as list of strings
     """
-    cmd: list[str] = []
-
-    # Wrap with xvfb-run for headless mode (no window focus stealing)
-    if config.headless:
-        cmd.extend(["xvfb-run", "-a"])
-
-    cmd.append(str(config.executable))
+    cmd: list[str] = [str(config.executable)]
 
     if config.user_dir:
         cmd.extend(["-u", str(config.user_dir)])
@@ -95,9 +89,39 @@ def create_playback_config(
 class DolphinController:
     """Controller for Dolphin emulator frame dumping."""
 
+    # Melee NTSC 1.02 game ID
+    MELEE_GAME_ID = "GALE01"
+
     def __init__(self, config: DolphinConfig) -> None:
         self.config = config
         self._process: subprocess.Popen[bytes] | None = None
+
+    def setup_music_mute(self) -> None:
+        """Set up Gecko code to mute in-game music (keeps SFX).
+
+        Creates a game-specific settings file with a Gecko code that
+        sets the music volume to 0 in Melee NTSC 1.02.
+        """
+        if self.config.user_dir is None:
+            raise ValueError("user_dir must be set to configure music mute")
+
+        # Create GameSettings directory
+        game_settings_dir = self.config.user_dir / "GameSettings"
+        game_settings_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write Gecko code to mute music for Melee NTSC 1.02
+        # Address 0x804D3887 is music volume, setting to 0 mutes it
+        gecko_ini_path = game_settings_dir / f"{self.MELEE_GAME_ID}.ini"
+        gecko_content = """\
+[Gecko_Enabled]
+$No Music
+
+[Gecko]
+$No Music
+00453887 00000000
+"""
+        with open(gecko_ini_path, "w") as f:
+            f.write(gecko_content)
 
     def setup_frame_dump(self, output_dir: Path) -> None:
         """Configure Dolphin for frame dumping.
@@ -150,9 +174,12 @@ class DolphinController:
         dolphin_config["DSP"]["DumpAudio"] = "True"
         dolphin_config["DSP"]["DumpAudioSilent"] = "True"
 
-        # Disable audio playback in headless mode (still dumps audio to file)
-        if self.config.headless:
-            dolphin_config["DSP"]["Backend"] = "No audio"
+        # Enable cheats for Gecko codes (music muting)
+        if self.config.mute_music:
+            if "Core" not in dolphin_config:
+                dolphin_config["Core"] = {}
+            dolphin_config["Core"]["EnableCheats"] = "True"
+            self.setup_music_mute()
 
         with open(dolphin_ini_path, "w") as f:
             dolphin_config.write(f)

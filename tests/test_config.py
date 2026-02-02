@@ -2,14 +2,16 @@
 
 from pathlib import Path
 
-from src.config import Config, load_config
+from src.config import Config, get_xdg_data_home, load_config
 
 
 def test_config_defaults() -> None:
     """Config has sensible defaults when no file exists."""
     config = Config()
 
-    assert config.db_path == Path("~/.slippi-clip/moments.db").expanduser()
+    # Uses XDG_DATA_HOME for database
+    expected_db = get_xdg_data_home() / "slippi-clip" / "moments.db"
+    assert config.db_path == expected_db
     assert config.player_port == 0
 
 
@@ -40,9 +42,10 @@ def test_load_config_missing_file() -> None:
     """load_config returns defaults when file doesn't exist."""
     config = load_config(Path("/nonexistent/config.toml"))
 
-    # Should return default config
+    # Should return default config with XDG paths
+    expected_db = get_xdg_data_home() / "slippi-clip" / "moments.db"
     assert config.player_port == 0
-    assert config.db_path == Path("~/.slippi-clip/moments.db").expanduser()
+    assert config.db_path == expected_db
 
 
 def test_config_partial_override(tmp_path: Path) -> None:
@@ -57,8 +60,9 @@ player_port = 3
 
     # Overridden value
     assert config.player_port == 3
-    # Default values
-    assert config.db_path == Path("~/.slippi-clip/moments.db").expanduser()
+    # Default values (XDG paths)
+    expected_db = get_xdg_data_home() / "slippi-clip" / "moments.db"
+    assert config.db_path == expected_db
 
 
 def test_config_player_tags_default() -> None:

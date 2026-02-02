@@ -1,5 +1,6 @@
 """Configuration file support for slippi-clip."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -10,6 +11,22 @@ except ImportError:
     import tomli as tomllib  # type: ignore[import-not-found,import-untyped]
 
 
+# XDG Base Directory helpers
+def get_xdg_config_home() -> Path:
+    """Get XDG_CONFIG_HOME (~/.config by default)."""
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+def get_xdg_data_home() -> Path:
+    """Get XDG_DATA_HOME (~/.local/share by default)."""
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+
+
+def get_xdg_cache_home() -> Path:
+    """Get XDG_CACHE_HOME (~/.cache by default)."""
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+
+
 @dataclass
 class Config:
     """Application configuration."""
@@ -18,17 +35,18 @@ class Config:
     player_port: int = 0
     player_tags: list[str] = field(default_factory=lambda: [])
 
-    # Database
+    # Database (in XDG_DATA_HOME)
     db_path: Path = field(
-        default_factory=lambda: Path("~/.slippi-clip/moments.db").expanduser()
+        default_factory=lambda: get_xdg_data_home() / "slippi-clip" / "moments.db"
     )
 
     # Dolphin
     dolphin_executable: Path = field(
         default_factory=lambda: Path("/usr/bin/dolphin-emu")
     )
+    # Dolphin profile for capture (in XDG_DATA_HOME, isolated from user's Slippi config)
     dolphin_user_dir: Path | None = field(
-        default_factory=lambda: Path.home() / ".dolphin-slippi"
+        default_factory=lambda: get_xdg_data_home() / "slippi-clip" / "dolphin"
     )
     iso_path: Path | None = None
 
@@ -88,5 +106,5 @@ def load_config(config_path: Path) -> Config:
 
 
 def get_default_config_path() -> Path:
-    """Get the default configuration file path."""
-    return Path("~/.slippi-clip/config.toml").expanduser()
+    """Get the default configuration file path (in XDG_CONFIG_HOME)."""
+    return get_xdg_config_home() / "slippi-clip" / "config.toml"

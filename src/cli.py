@@ -186,8 +186,8 @@ def find(ctx: click.Context, tag: tuple[str, ...], opponent: str | None, db: Pat
 
 
 def get_default_clips_path() -> Path:
-    """Get the default clips output path."""
-    return Path("~/.slippi-clip/clips").expanduser()
+    """Get the default clips output path (user-facing content in ~/Videos)."""
+    return Path.home() / "Videos" / "slippi-clips"
 
 
 @main.command()
@@ -196,7 +196,7 @@ def get_default_clips_path() -> Path:
     "-o", "--output",
     type=click.Path(path_type=Path),
     default=None,
-    help="Output directory for clips (default: ~/.slippi-clip/clips/)",
+    help="Output directory for clips (default: ~/Videos/slippi-clips/)",
 )
 @click.option(
     "--db",
@@ -210,11 +210,6 @@ def get_default_clips_path() -> Path:
     default=None,
     help="Maximum number of clips to capture (for testing)",
 )
-@click.option(
-    "--headless",
-    is_flag=True,
-    help="Run Dolphin headless (no window focus, no audio playback)",
-)
 @click.pass_context
 def capture(
     ctx: click.Context,
@@ -222,7 +217,6 @@ def capture(
     output: Path | None,
     db: Path | None,
     limit: int | None,
-    headless: bool,
 ) -> None:
     """Capture video clips for matching moments."""
     cfg: Config = ctx.obj["config"]
@@ -254,7 +248,6 @@ def capture(
         executable=cfg.dolphin_executable,
         user_dir=cfg.dolphin_user_dir,
         iso_path=cfg.iso_path,
-        headless=headless,
     )
 
     pipeline = CapturePipeline(output_dir=output_dir, dolphin_config=dolphin_config)
