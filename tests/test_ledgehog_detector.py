@@ -376,6 +376,7 @@ def test_ledgehog_opponent_below_ledge() -> None:
         frames.append(make_frame(i, stage_id=stage_id, opponent_stocks=4))
 
     # Player grabs ledge, opponent is below but close horizontally
+    # Y=-15 is within ledge-grab range (-5 to -20) - sweetspotting position
     frames.append(
         make_frame(
             100,
@@ -383,7 +384,7 @@ def test_ledgehog_opponent_below_ledge() -> None:
             player_y=-10.0,
             player_action=ActionState.CLIFF_CATCH,
             opponent_x=edge_x + 8.0,  # Close horizontally
-            opponent_y=-40.0,  # Below ledge, recovering upward
+            opponent_y=-15.0,  # At ledge-grab height (sweetspot range)
             opponent_action=ActionState.FALL_SPECIAL,
             opponent_stocks=4,
             stage_id=stage_id,
@@ -515,6 +516,7 @@ def test_no_ledgehog_when_opponent_too_high() -> None:
         frames.append(make_frame(i, stage_id=stage_id, opponent_stocks=4))
 
     # Player grabs ledge
+    # Y=0.0 is above stage level, not at ledge-grab height (must be <= -5)
     frames.append(
         make_frame(
             100,
@@ -522,7 +524,7 @@ def test_no_ledgehog_when_opponent_too_high() -> None:
             player_y=-10.0,
             player_action=ActionState.CLIFF_CATCH,
             opponent_x=edge_x + 10.0,  # Close horizontally
-            opponent_y=-5.0,  # But too HIGH - above ledge grab range
+            opponent_y=0.0,  # But too HIGH - above ledge grab range (need <= -5)
             opponent_action=ActionState.FALL_SPECIAL,
             opponent_stocks=4,
             stage_id=stage_id,
@@ -538,7 +540,7 @@ def test_no_ledgehog_when_opponent_too_high() -> None:
                 player_y=-10.0,
                 player_action=ActionState.CLIFF_WAIT,
                 opponent_x=edge_x + 15.0,
-                opponent_y=-8.0,  # Still too high
+                opponent_y=-3.0,  # Still too high (need <= -5 to be in grab range)
                 opponent_action=ActionState.FALL_SPECIAL,
                 opponent_stocks=4,
                 stage_id=stage_id,

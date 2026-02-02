@@ -89,11 +89,11 @@ def load_config(config_path: Path) -> Config:
     # Dolphin section
     dolphin = cast(dict[str, Any], data.get("dolphin", {}))
     if "executable" in dolphin:
-        config.dolphin_executable = Path(str(dolphin["executable"]))
+        config.dolphin_executable = Path(str(dolphin["executable"])).expanduser()
     if "user_dir" in dolphin:
-        config.dolphin_user_dir = Path(str(dolphin["user_dir"]))
+        config.dolphin_user_dir = Path(str(dolphin["user_dir"])).expanduser()
     if "iso_path" in dolphin:
-        config.iso_path = Path(str(dolphin["iso_path"]))
+        config.iso_path = Path(str(dolphin["iso_path"])).expanduser()
 
     # FFmpeg section
     ffmpeg = cast(dict[str, Any], data.get("ffmpeg", {}))

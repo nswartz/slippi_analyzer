@@ -3,6 +3,7 @@
 import configparser
 import json
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,13 +95,200 @@ class DolphinController:
 
     def __init__(self, config: DolphinConfig) -> None:
         self.config = config
-        self._process: subprocess.Popen[bytes] | None = None
+        self._process: subprocess.Popen[str] | None = None
+        self._original_window: str | None = None
+        self._minimize_thread: threading.Thread | None = None
+        self._stop_minimize_thread = threading.Event()
+        self._minimized_windows: set[str] = set()
+
+    def _get_active_window(self) -> str | None:
+        """Get the currently active window ID using xdotool."""
+        try:
+            result = subprocess.run(
+                ["xdotool", "getactivewindow"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        return None
+
+    def _find_dolphin_windows(self) -> list[str]:
+        """Find Dolphin window IDs by searching multiple patterns."""
+        window_ids: list[str] = []
+        # Try multiple search patterns - AppImage may use different names
+        search_patterns = [
+            ["xdotool", "search", "--name", "Slippi"],
+            ["xdotool", "search", "--name", "Dolphin"],
+            ["xdotool", "search", "--class", "dolphin-emu"],
+            ["xdotool", "search", "--class", "dolphin"],
+        ]
+        for pattern in search_patterns:
+            try:
+                result = subprocess.run(
+                    pattern,
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    for wid in result.stdout.strip().split("\n"):
+                        if wid and wid not in window_ids:
+                            window_ids.append(wid)
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+        return window_ids
+
+    def _window_minimizer_loop(self) -> None:
+        """Background thread that continuously minimizes Dolphin windows.
+
+        Polls rapidly to catch windows as soon as they appear, minimizing
+        them before they can flash on screen or steal focus.
+        """
+        while not self._stop_minimize_thread.is_set():
+            try:
+                window_ids = self._find_dolphin_windows()
+                for window_id in window_ids:
+                    if window_id not in self._minimized_windows:
+                        # Minimize this new window immediately
+                        subprocess.run(
+                            ["xdotool", "windowminimize", window_id],
+                            timeout=2,
+                            capture_output=True,
+                        )
+                        self._minimized_windows.add(window_id)
+                        # Restore focus to original window
+                        if self._original_window:
+                            subprocess.run(
+                                ["xdotool", "windowactivate", self._original_window],
+                                timeout=2,
+                                capture_output=True,
+                            )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+            # Poll every 50ms for fast response
+            time.sleep(0.05)
+
+    def _start_window_minimizer(self) -> None:
+        """Start the background window minimizer thread."""
+        self._stop_minimize_thread.clear()
+        self._minimized_windows.clear()
+        self._minimize_thread = threading.Thread(
+            target=self._window_minimizer_loop,
+            daemon=True,
+        )
+        self._minimize_thread.start()
+
+    def _stop_window_minimizer(self) -> None:
+        """Stop the background window minimizer thread."""
+        self._stop_minimize_thread.set()
+        if self._minimize_thread is not None:
+            self._minimize_thread.join(timeout=2)
+            self._minimize_thread = None
+
+    def _minimize_dolphin_window(self) -> None:
+        """Find and minimize Dolphin window immediately, restore focus.
+
+        Uses xdotool --sync to wait for window to appear rather than fixed sleep,
+        which minimizes the window as soon as it's created.
+        """
+        try:
+            # Use --sync to wait for window to appear (up to 10 seconds)
+            # This minimizes as soon as the window exists, reducing visibility
+            result = subprocess.run(
+                ["xdotool", "search", "--sync", "--name", "Slippi"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                window_ids = result.stdout.strip().split("\n")
+                for window_id in window_ids:
+                    if window_id:
+                        # Minimize immediately
+                        subprocess.run(
+                            ["xdotool", "windowminimize", "--sync", window_id],
+                            timeout=5,
+                        )
+            else:
+                # Fallback: try other patterns
+                window_ids = self._find_dolphin_windows()
+                for window_id in window_ids:
+                    subprocess.run(
+                        ["xdotool", "windowminimize", window_id],
+                        timeout=5,
+                    )
+
+            # Restore focus to original window
+            if self._original_window:
+                subprocess.run(
+                    ["xdotool", "windowactivate", "--sync", self._original_window],
+                    timeout=5,
+                )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            # xdotool not available or timed out, continue without minimizing
+            pass
+
+    def _mute_dolphin_audio(self) -> None:
+        """Mute Dolphin's audio output via PulseAudio/PipeWire.
+
+        This mutes the application so you don't hear it during capture,
+        while still allowing audio to be dumped to file.
+        """
+        try:
+            # Wait for Dolphin to register with PulseAudio
+            time.sleep(1.5)
+
+            # Get detailed sink input info and find Dolphin
+            result = subprocess.run(
+                ["pactl", "list", "sink-inputs"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return
+
+            # Parse sink inputs - each starts with "Sink Input #N"
+            current_id: str | None = None
+            current_app: str = ""
+
+            for line in result.stdout.split("\n"):
+                line_stripped = line.strip()
+                if line_stripped.startswith("Sink Input #"):
+                    # Save previous if it was Dolphin
+                    if current_id and ("dolphin" in current_app or "slippi" in current_app):
+                        subprocess.run(
+                            ["pactl", "set-sink-input-mute", current_id, "1"],
+                            timeout=5,
+                        )
+                    # Start new sink input
+                    current_id = line_stripped.split("#")[1].strip()
+                    current_app = ""
+                elif "application.name" in line_stripped.lower():
+                    current_app = line_stripped.lower()
+                elif "application.process.binary" in line_stripped.lower():
+                    current_app += " " + line_stripped.lower()
+
+            # Check the last one
+            if current_id and ("dolphin" in current_app or "slippi" in current_app):
+                subprocess.run(
+                    ["pactl", "set-sink-input-mute", current_id, "1"],
+                    timeout=5,
+                )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            # pactl not available, continue without muting
+            pass
 
     def setup_music_mute(self) -> None:
         """Set up Gecko code to mute in-game music (keeps SFX).
 
         Creates a game-specific settings file with a Gecko code that
-        sets the music volume to 0 in Melee NTSC 1.02.
+        disables music playback in Melee NTSC 1.02.
         """
         if self.config.user_dir is None:
             raise ValueError("user_dir must be set to configure music mute")
@@ -109,16 +297,17 @@ class DolphinController:
         game_settings_dir = self.config.user_dir / "GameSettings"
         game_settings_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write Gecko code to mute music for Melee NTSC 1.02
-        # Address 0x804D3887 is music volume, setting to 0 mutes it
+        # Write Gecko code to disable music for Melee NTSC 1.02
+        # "Netplay Safe Kill Music" by Myougi - works by returning 1 from music check
+        # Source: https://www.smashladder.com/blogs/view/270d/2017-03-31/netplay-safe-kill-music-gecko-code-for-fm-4-4
         gecko_ini_path = game_settings_dir / f"{self.MELEE_GAME_ID}.ini"
         gecko_content = """\
 [Gecko_Enabled]
-$No Music
+$Netplay Safe Kill Music
 
 [Gecko]
-$No Music
-00453887 00000000
+$Netplay Safe Kill Music
+040249a4 38600001
 """
         with open(gecko_ini_path, "w") as f:
             f.write(gecko_content)
@@ -221,7 +410,17 @@ $No Music
             output_dir=output_dir,
         )
 
+        # Save current window for focus restoration
+        self._original_window = self._get_active_window()
+
+        # Start background thread to minimize windows BEFORE launching Dolphin
+        # This catches windows as soon as they appear, preventing flash
+        self._start_window_minimizer()
+
         self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+
+        # Mute Dolphin audio output (so user doesn't hear it during capture)
+        self._mute_dolphin_audio()
 
     def wait_for_completion(
         self,
@@ -275,6 +474,9 @@ $No Music
         # Give Dolphin time to finish writing files
         time.sleep(2)
 
+        # Stop the window minimizer thread
+        self._stop_window_minimizer()
+
         # Terminate Dolphin
         self._process.terminate()
         try:
@@ -289,6 +491,7 @@ $No Music
 
     def stop(self) -> None:
         """Stop Dolphin capture."""
+        self._stop_window_minimizer()
         if self._process is not None:
             self._process.terminate()
             self._process.wait(timeout=10)
