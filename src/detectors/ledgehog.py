@@ -59,7 +59,8 @@ class LedgehogDetector:
 
     # Ledge-grab position thresholds
     LEDGE_GRAB_DISTANCE = 15.0  # Max horizontal distance from edge to grab ledge
-    LEDGE_GRAB_MAX_HEIGHT = 0.0  # Must be at or below stage level to be grabbing ledge
+    LEDGE_GRAB_MAX_HEIGHT = -15.0  # Must be at ledge height (below stage level)
+    LEDGE_GRAB_MIN_HEIGHT = -45.0  # Not too far below (blast zone)
 
     @property
     def name(self) -> str:
@@ -93,11 +94,12 @@ class LedgehogDetector:
 
             # Check if opponent is in "ledge-grab position"
             # This means they're close enough to the ledge to grab it
+            # They must be at actual ledge height, not floating above the stage
             opponent_in_ledge_grab_position = (
                 abs(frame.opponent_x) >= edge_x - 5 and  # At or past edge
                 abs(frame.opponent_x) <= edge_x + self.LEDGE_GRAB_DISTANCE and
-                frame.opponent_y <= self.LEDGE_GRAB_MAX_HEIGHT and
-                frame.opponent_y > -60  # Not too far below (in blast zone)
+                frame.opponent_y <= self.LEDGE_GRAB_MAX_HEIGHT and  # At ledge height
+                frame.opponent_y > self.LEDGE_GRAB_MIN_HEIGHT  # Not in blast zone
             )
 
             # Start tracking when player grabs ledge and opponent is offstage

@@ -185,9 +185,19 @@ def find(ctx: click.Context, tag: tuple[str, ...], opponent: str | None, db: Pat
         )
 
 
+def get_default_clips_path() -> Path:
+    """Get the default clips output path."""
+    return Path("~/.slippi-clip/clips").expanduser()
+
+
 @main.command()
 @click.option("--tag", multiple=True, help="Filter by tag")
-@click.option("-o", "--output", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "-o", "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output directory for clips (default: ~/.slippi-clip/clips/)",
+)
 @click.option(
     "--db",
     type=click.Path(exists=True, path_type=Path),
@@ -195,7 +205,7 @@ def find(ctx: click.Context, tag: tuple[str, ...], opponent: str | None, db: Pat
     help="Database path",
 )
 @click.pass_context
-def capture(ctx: click.Context, tag: tuple[str, ...], output: Path, db: Path | None) -> None:
+def capture(ctx: click.Context, tag: tuple[str, ...], output: Path | None, db: Path | None) -> None:
     """Capture video clips for matching moments."""
     cfg: Config = ctx.obj["config"]
     db_path = db or cfg.db_path
@@ -211,9 +221,8 @@ def capture(ctx: click.Context, tag: tuple[str, ...], output: Path, db: Path | N
         click.echo("No moments found matching the specified tags.")
         return
 
-    # Create subdirectory named after the searched tags
-    tag_dirname = "_".join(t.replace(":", "-") for t in tag)
-    output_dir = output / tag_dirname
+    # Use specified output or default
+    output_dir = output or get_default_clips_path()
 
     click.echo(f"Capturing {len(all_moments)} clips to {output_dir}")
 

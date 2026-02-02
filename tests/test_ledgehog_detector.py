@@ -496,3 +496,66 @@ def test_ledgehog_when_opponent_reaches_position_later() -> None:
     # IS a ledgehog - opponent reached grab position while player on ledge
     assert len(moments) == 1
     assert "ledgehog" in moments[0].tags
+
+
+def test_no_ledgehog_when_opponent_too_high() -> None:
+    """No ledgehog if opponent is close horizontally but too high.
+
+    This tests the Falco case: opponent is near the edge horizontally,
+    but they're above the ledge and wouldn't have grabbed it anyway.
+    They need to be at actual ledge height (below stage level) to count.
+    """
+    detector = LedgehogDetector()
+    stage_id = 2  # Fountain of Dreams
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id, opponent_stocks=4))
+
+    # Player grabs ledge
+    frames.append(
+        make_frame(
+            100,
+            player_x=edge_x,
+            player_y=-10.0,
+            player_action=ActionState.CLIFF_CATCH,
+            opponent_x=edge_x + 10.0,  # Close horizontally
+            opponent_y=-5.0,  # But too HIGH - above ledge grab range
+            opponent_action=ActionState.FALL_SPECIAL,
+            opponent_stocks=4,
+            stage_id=stage_id,
+        )
+    )
+
+    # Opponent stays too high and falls past
+    for i in range(101, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 15.0,
+                opponent_y=-8.0,  # Still too high
+                opponent_action=ActionState.FALL_SPECIAL,
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent dies
+    for i in range(150, 200):
+        frames.append(
+            make_frame(
+                i,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    # Should NOT detect - opponent was too high to grab ledge
+    assert len(moments) == 0
