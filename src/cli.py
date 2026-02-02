@@ -1,5 +1,6 @@
 """CLI interface for slippi-clip."""
 
+import os
 from pathlib import Path
 
 import click
@@ -51,6 +52,12 @@ def main(ctx: click.Context, config: Path | None) -> None:
     multiple=True,
     help="Player connect code (e.g., PDL-637 or PDL#637). Can be specified multiple times.",
 )
+@click.option(
+    "--workers",
+    type=int,
+    default=None,
+    help="Number of parallel workers (default: CPU count, max 8)",
+)
 @click.pass_context
 def scan(
     ctx: click.Context,
@@ -59,6 +66,7 @@ def scan(
     db: Path | None,
     player_port: int | None,
     player_tag: tuple[str, ...],
+    workers: int | None,
 ) -> None:
     """Scan replay directory for moments."""
     cfg: Config = ctx.obj["config"]
@@ -95,9 +103,11 @@ def scan(
     scanner = ReplayScanner()
     registry = DetectorRegistry.with_default_detectors()
 
-    # Scan each replay
-    scanned_count = 0
-    total_moments = 0
+    # Determine worker count
+    max_workers = workers or min(os.cpu_count() or 4, 8)
+
+    # First pass: collect replays that need scanning with their player ports
+    replays_to_scan: list[tuple[Path, int, float]] = []  # (path, port, mtime)
     skipped_no_player = 0
 
     for replay_path in replay_files:
@@ -117,25 +127,64 @@ def scan(
         else:
             port = fallback_port
 
+        replays_to_scan.append((replay_path, port, mtime))
+
+    if not replays_to_scan:
+        click.echo("All replays already scanned or no matching player found")
+        if skipped_no_player > 0:
+            click.echo(f"Skipped {skipped_no_player} replays (player not found)")
+        return
+
+    click.echo(f"Scanning {len(replays_to_scan)} replays with {max_workers} workers...")
+
+    # Group replays by port for parallel processing
+    # (Most common case: all replays use same port)
+    replays_by_port: dict[int, list[tuple[Path, float]]] = {}
+    for path, port, mtime in replays_to_scan:
+        if port not in replays_by_port:
+            replays_by_port[port] = []
+        replays_by_port[port].append((path, mtime))
+
+    scanned_count = 0
+    total_moments = 0
+    errors = 0
+
+    def progress_callback(completed: int, total: int) -> None:
+        nonlocal scanned_count
+        scanned_count = completed
+        if completed % 10 == 0 or completed == total:
+            click.echo(f"  Progress: {completed}/{total}")
+
+    # Process each port group (usually just one)
+    for port, path_mtime_list in replays_by_port.items():
+        paths = [p for p, _ in path_mtime_list]
+        mtimes = {p: m for p, m in path_mtime_list}
+
         try:
-            moments = scanner.scan_replay(
-                replay_path=replay_path,
+            # Use parallel scanning
+            results = scanner.scan_replays_parallel(
+                paths,
                 player_port=port,
                 registry=registry,
+                max_workers=max_workers,
+                progress_callback=progress_callback,
             )
 
-            # Store each moment in database
-            for moment in moments:
-                database.store_moment(moment, mtime=mtime)
+            # Store moments in database
+            for path, moments in zip(paths, results):
+                for moment in moments:
+                    database.store_moment(moment, mtime=mtimes[path])
+                total_moments += len(moments)
 
-            scanned_count += 1
-            total_moments += len(moments)
         except Exception as e:
-            click.echo(f"  Error scanning {replay_path.name}: {e}", err=True)
+            click.echo(f"  Error during parallel scan: {e}", err=True)
+            errors += 1
 
     click.echo(f"Scanned {scanned_count} replays, found {total_moments} moments")
     if skipped_no_player > 0:
         click.echo(f"Skipped {skipped_no_player} replays (player not found)")
+    if errors > 0:
+        click.echo(f"Encountered {errors} errors during scanning")
 
 
 @main.command()

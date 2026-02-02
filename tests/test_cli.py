@@ -191,3 +191,12 @@ def test_scan_with_player_tags_finds_correct_player(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Scanned 1" in result.output or "scanned 1" in result.output.lower()
+
+
+def test_scan_accepts_workers_option() -> None:
+    """Scan command accepts --workers option for parallel processing."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["scan", "--help"])
+
+    assert result.exit_code == 0
+    assert "--workers" in result.output
