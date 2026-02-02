@@ -413,11 +413,14 @@ $Netplay Safe Kill Music
         # Save current window for focus restoration
         self._original_window = self._get_active_window()
 
-        # Start background thread to minimize windows BEFORE launching Dolphin
-        # This catches windows as soon as they appear, preventing flash
+        # Start background thread to minimize windows as they appear
         self._start_window_minimizer()
 
         self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+
+        # IMMEDIATELY minimize first window with --sync (waits for window to exist)
+        # This catches the first window before the polling loop can miss it
+        self._minimize_dolphin_window()
 
         # Mute Dolphin audio output (so user doesn't hear it during capture)
         self._mute_dolphin_audio()

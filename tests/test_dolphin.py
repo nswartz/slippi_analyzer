@@ -140,7 +140,8 @@ def test_wait_for_completion_monitors_file_size(tmp_path: Path) -> None:
     mock_process = MagicMock()
     mock_process.poll.return_value = None  # Process still running
     mock_process.returncode = 0
-    controller._process = mock_process
+    # Accessing protected member is acceptable in tests for mocking
+    controller._process = mock_process  # pyright: ignore[reportPrivateUsage]
 
     # Track terminate calls
     terminate_called = False
@@ -163,3 +164,59 @@ def test_wait_for_completion_monitors_file_size(tmp_path: Path) -> None:
     # Should have terminated the process
     assert terminate_called, "Process should be terminated when file stops growing"
     assert result == 0
+
+
+def test_start_capture_calls_minimize_with_sync_after_launch() -> None:
+    """First Dolphin window should be minimized with --sync after Popen."""
+    config = DolphinConfig(
+        executable=Path("/usr/bin/echo"),
+        user_dir=Path("/tmp/test-dolphin"),
+        iso_path=Path("/tmp/test.iso"),
+    )
+    controller = DolphinController(config)
+
+    # Track call ordering: list of ("popen", cmd) or ("run", cmd) tuples
+    call_order: list[tuple[str, list[str]]] = []
+
+    def mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+        call_order.append(("run", list(cmd)))
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "12345"
+        return result
+
+    def mock_popen_init(cmd: list[str], **kwargs: object) -> MagicMock:
+        call_order.append(("popen", list(cmd)))
+        return MagicMock()
+
+    with patch("subprocess.run", side_effect=mock_run):
+        with patch("subprocess.Popen", side_effect=mock_popen_init):
+            Path("/tmp/test-dolphin/Slippi").mkdir(parents=True, exist_ok=True)
+            Path("/tmp/test-dolphin/Config").mkdir(parents=True, exist_ok=True)
+
+            controller.start_capture(
+                replay_path=Path("/tmp/test.slp"),
+                output_dir=Path("/tmp/output"),
+            )
+
+            # Accessing protected method is acceptable in tests for cleanup
+            controller._stop_window_minimizer()  # pyright: ignore[reportPrivateUsage]
+
+    # Find the index of Popen call
+    popen_indices = [i for i, (call_type, _) in enumerate(call_order) if call_type == "popen"]
+    assert len(popen_indices) >= 1, f"Popen should be called. Calls: {call_order}"
+    popen_index = popen_indices[0]
+
+    # Find the index of xdotool search --sync call
+    sync_search_indices = [
+        i for i, (call_type, cmd) in enumerate(call_order)
+        if call_type == "run" and "xdotool" in cmd and "--sync" in cmd and "search" in cmd
+    ]
+    assert len(sync_search_indices) >= 1, f"Should have --sync search call. Calls: {call_order}"
+    sync_search_index = sync_search_indices[0]
+
+    # Critical: verify xdotool search --sync is called AFTER Popen
+    assert sync_search_index > popen_index, (
+        f"xdotool search --sync (index {sync_search_index}) must be called after "
+        f"Popen (index {popen_index}). Call order: {call_order}"
+    )
