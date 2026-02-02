@@ -178,8 +178,12 @@ def parse_replay_to_frames(
 class ReplayScanner:
     """Scanner for extracting moments from Slippi replays."""
 
-    def get_metadata(self, replay_path: Path) -> dict[str, str]:
+    def get_metadata(self, replay_path: Path, player_port: int) -> dict[str, str]:
         """Extract metadata from a replay file.
+
+        Args:
+            replay_path: Path to the .slp file
+            player_port: Port index of the player (0-3)
 
         Returns dict with: date, stage, player (character name)
         """
@@ -197,11 +201,10 @@ class ReplayScanner:
             stage_id = game.start.stage.value
             stage_name = STAGE_NAMES.get(stage_id, "unknown")
 
-            # Find first human player's character (assume port 0 for now)
-            for player in game.start.players:
-                if player is not None:
-                    player_char = get_character_name(player.character)
-                    break
+            # Get the player's character from their port
+            player_info = game.start.players[player_port]
+            if player_info is not None:
+                player_char = get_character_name(player_info.character)
 
         return {
             "date": date_str,
@@ -271,7 +274,7 @@ class ReplayScanner:
             List of detected moments with metadata filled in
         """
         # Get base metadata
-        metadata = self.get_metadata(replay_path)
+        metadata = self.get_metadata(replay_path, player_port)
 
         # Parse replay to frames for each opponent
         frames_by_opponent = parse_replay_to_frames(replay_path, player_port)

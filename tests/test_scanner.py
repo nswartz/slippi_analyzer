@@ -83,11 +83,12 @@ def test_replay_scanner_extracts_metadata() -> None:
         pytest.skip("Test fixture not available")
 
     scanner = ReplayScanner()
-    metadata = scanner.get_metadata(replay_path)
+    metadata = scanner.get_metadata(replay_path, player_port=0)
 
     assert "date" in metadata
     assert "stage" in metadata
     assert "player" in metadata  # Character name
+    assert metadata["player"] == "sheik"  # Port 0 is Sheik in fixture
 
 
 def test_replay_scanner_identifies_teammates_vs_opponents() -> None:
