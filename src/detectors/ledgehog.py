@@ -37,18 +37,29 @@ class LedgehogEvent:
     """Internal tracking for a potential ledgehog."""
 
     ledge_grab_frame: int
-    player_left_ledge_frame: int | None = None  # When player left ledge (if they did)
-    opponent_was_helpless: bool = False  # Was opponent ever in FALL_SPECIAL?
-    opponent_approached_ledge: bool = False  # Did opponent get close to ledge?
+    player_left_ledge_frame: int | None = None
+    opponent_reached_ledge_position: bool = False  # Did opponent get to ledge-grab position?
 
 
 class LedgehogDetector:
-    """Detects ledgehog moments in replays."""
+    """Detects ledgehog moments in replays.
+
+    A ledgehog is detected when:
+    1. Player is on the ledge (CLIFF_CATCH or CLIFF_WAIT)
+    2. Opponent reaches "ledge-grab position" (close to ledge, at/below ledge height)
+    3. Opponent subsequently loses a stock
+
+    This captures the essence of a ledgehog - the player taking the ledge
+    when the opponent needed it to recover.
+    """
 
     FRAMES_BEFORE = 300  # 5 seconds at 60fps
     FRAMES_AFTER = 120   # 2 seconds at 60fps
     POST_LEDGE_WINDOW = 120  # Continue tracking for 2 seconds after player leaves ledge
-    LEDGE_APPROACH_DISTANCE = 30.0  # Opponent must get within this distance of edge to count
+
+    # Ledge-grab position thresholds
+    LEDGE_GRAB_DISTANCE = 15.0  # Max horizontal distance from edge to grab ledge
+    LEDGE_GRAB_MAX_HEIGHT = 0.0  # Must be at or below stage level to be grabbing ledge
 
     @property
     def name(self) -> str:
@@ -75,35 +86,33 @@ class LedgehogDetector:
                 ActionState.CLIFF_CATCH,
             )
             opponent_offstage = abs(frame.opponent_x) > edge_x
-            opponent_helpless = frame.opponent_action_state == ActionState.FALL_SPECIAL
             opponent_on_stage = (
                 abs(frame.opponent_x) < edge_x and
                 frame.opponent_y > -20  # Roughly above stage level
             )
-            # Check if opponent is close to the ledge (within approach distance)
-            opponent_near_ledge = (
-                abs(frame.opponent_x) <= edge_x + self.LEDGE_APPROACH_DISTANCE and
-                frame.opponent_y > -50  # Not too far below stage
+
+            # Check if opponent is in "ledge-grab position"
+            # This means they're close enough to the ledge to grab it
+            opponent_in_ledge_grab_position = (
+                abs(frame.opponent_x) >= edge_x - 5 and  # At or past edge
+                abs(frame.opponent_x) <= edge_x + self.LEDGE_GRAB_DISTANCE and
+                frame.opponent_y <= self.LEDGE_GRAB_MAX_HEIGHT and
+                frame.opponent_y > -60  # Not too far below (in blast zone)
             )
 
-            # Start tracking when player grabs ledge and opponent is offstage OR helpless
-            # (helpless can happen on-stage from Up-B toward ledge)
-            if player_on_ledge and (opponent_offstage or opponent_helpless):
+            # Start tracking when player grabs ledge and opponent is offstage
+            if player_on_ledge and opponent_offstage:
                 if tracking_event is None:
                     tracking_event = LedgehogEvent(
                         ledge_grab_frame=frame.frame_number,
-                        opponent_was_helpless=opponent_helpless,
-                        opponent_approached_ledge=opponent_near_ledge,
+                        opponent_reached_ledge_position=opponent_in_ledge_grab_position,
                     )
 
-            # Continue tracking state even after player leaves ledge
+            # Continue tracking
             if tracking_event is not None:
-                if opponent_helpless:
-                    tracking_event.opponent_was_helpless = True
-
-                # Track if opponent ever gets close to ledge
-                if opponent_near_ledge:
-                    tracking_event.opponent_approached_ledge = True
+                # Track if opponent ever reaches ledge-grab position while player on ledge
+                if player_on_ledge and opponent_in_ledge_grab_position:
+                    tracking_event.opponent_reached_ledge_position = True
 
                 # Note when player leaves ledge
                 if not player_on_ledge and tracking_event.player_left_ledge_frame is None:
@@ -111,14 +120,8 @@ class LedgehogDetector:
 
                 # Check for stock loss
                 if frame.opponent_stocks < prev_opponent_stocks:
-                    # Only count as ledgehog if opponent actually approached
-                    if tracking_event.opponent_approached_ledge:
-                        tags = ["ledgehog:basic"]
-
-                        # Add strict tag if opponent was in helpless state
-                        if tracking_event.opponent_was_helpless:
-                            tags.append("ledgehog:strict")
-
+                    # Only count as ledgehog if opponent reached ledge-grab position
+                    if tracking_event.opponent_reached_ledge_position:
                         frame_start = max(
                             0, tracking_event.ledge_grab_frame - self.FRAMES_BEFORE
                         )
@@ -132,7 +135,7 @@ class LedgehogDetector:
                                 replay_path=replay_path,
                                 frame_start=frame_start,
                                 frame_end=frame_end,
-                                tags=tags,
+                                tags=["ledgehog"],
                                 metadata={},
                             )
                         )
@@ -141,7 +144,7 @@ class LedgehogDetector:
                 # Cancel tracking if:
                 # - Opponent lands safely on stage
                 # - Too much time passed since player left ledge
-                elif opponent_on_stage and not opponent_helpless:
+                elif opponent_on_stage:
                     tracking_event = None
                 elif (tracking_event.player_left_ledge_frame is not None and
                       frame.frame_number - tracking_event.player_left_ledge_frame > self.POST_LEDGE_WINDOW):
