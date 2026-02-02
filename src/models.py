@@ -28,12 +28,16 @@ class TaggedMoment:
 def generate_clip_filename(moment: TaggedMoment, index: int) -> str:
     """Generate a descriptive filename for a clip.
 
-    Format: {index:03d}_{player}_vs-{opponent}_{stage}.mp4
+    Format: {index:03d}_{replay_id}_{player}_vs-{opponent}_{stage}.mp4
+
+    The replay_id is the .slp filename stem (e.g., Game_20251104T161359)
+    which allows tracing clips back to source replays.
 
     Tags are stored in sidecar JSON files, not in the filename.
     """
+    replay_id = moment.replay_path.stem
     player = moment.metadata.get("player", "unknown")
     opponent = moment.metadata.get("opponent", "unknown")
     stage = moment.metadata.get("stage", "unknown")
 
-    return f"{index:03d}_{player}_vs-{opponent}_{stage}.mp4"
+    return f"{index:03d}_{replay_id}_{player}_vs-{opponent}_{stage}.mp4"

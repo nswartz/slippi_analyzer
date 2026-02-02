@@ -8,7 +8,7 @@ from src.models import TaggedMoment, generate_clip_filename
 def test_generate_clip_filename_basic() -> None:
     """Generate descriptive filename from moment metadata (no tags in filename)."""
     moment = TaggedMoment(
-        replay_path=Path("/replays/game.slp"),
+        replay_path=Path("/replays/Game_20251104T161359.slp"),
         frame_start=1000,
         frame_end=1500,
         tags=["ledgehog:strict"],
@@ -22,13 +22,14 @@ def test_generate_clip_filename_basic() -> None:
 
     filename = generate_clip_filename(moment, index=1)
     # Tags are stored in sidecar JSON, not filename
-    assert filename == "001_sheik_vs-fox_battlefield.mp4"
+    # Replay ID is included for traceability
+    assert filename == "001_Game_20251104T161359_sheik_vs-fox_battlefield.mp4"
 
 
 def test_generate_clip_filename_preserves_index() -> None:
     """Index is zero-padded in filename."""
     moment = TaggedMoment(
-        replay_path=Path("/replays/game.slp"),
+        replay_path=Path("/replays/Game_20251105T152816.slp"),
         frame_start=1000,
         frame_end=1500,
         tags=["ledgehog:basic", "ledgehog:strict"],
@@ -40,7 +41,7 @@ def test_generate_clip_filename_preserves_index() -> None:
     )
 
     filename = generate_clip_filename(moment, index=42)
-    assert filename == "042_sheik_vs-marth_yoshis.mp4"
+    assert filename == "042_Game_20251105T152816_sheik_vs-marth_yoshis.mp4"
 
 
 def test_generate_clip_filename_missing_metadata() -> None:
@@ -54,4 +55,4 @@ def test_generate_clip_filename_missing_metadata() -> None:
     )
 
     filename = generate_clip_filename(moment, index=1)
-    assert filename == "001_unknown_vs-unknown_unknown.mp4"
+    assert filename == "001_game_unknown_vs-unknown_unknown.mp4"
