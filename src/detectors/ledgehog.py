@@ -39,6 +39,7 @@ class LedgehogEvent:
     ledge_grab_frame: int
     player_left_ledge_frame: int | None = None  # When player left ledge (if they did)
     opponent_was_helpless: bool = False  # Was opponent ever in FALL_SPECIAL?
+    opponent_approached_ledge: bool = False  # Did opponent get close to ledge?
 
 
 class LedgehogDetector:
@@ -47,6 +48,7 @@ class LedgehogDetector:
     FRAMES_BEFORE = 300  # 5 seconds at 60fps
     FRAMES_AFTER = 120   # 2 seconds at 60fps
     POST_LEDGE_WINDOW = 120  # Continue tracking for 2 seconds after player leaves ledge
+    LEDGE_APPROACH_DISTANCE = 30.0  # Opponent must get within this distance of edge to count
 
     @property
     def name(self) -> str:
@@ -78,6 +80,11 @@ class LedgehogDetector:
                 abs(frame.opponent_x) < edge_x and
                 frame.opponent_y > -20  # Roughly above stage level
             )
+            # Check if opponent is close to the ledge (within approach distance)
+            opponent_near_ledge = (
+                abs(frame.opponent_x) <= edge_x + self.LEDGE_APPROACH_DISTANCE and
+                frame.opponent_y > -50  # Not too far below stage
+            )
 
             # Start tracking when player grabs ledge and opponent is offstage OR helpless
             # (helpless can happen on-stage from Up-B toward ledge)
@@ -86,12 +93,17 @@ class LedgehogDetector:
                     tracking_event = LedgehogEvent(
                         ledge_grab_frame=frame.frame_number,
                         opponent_was_helpless=opponent_helpless,
+                        opponent_approached_ledge=opponent_near_ledge,
                     )
 
-            # Continue tracking helpless state even after player leaves ledge
+            # Continue tracking state even after player leaves ledge
             if tracking_event is not None:
                 if opponent_helpless:
                     tracking_event.opponent_was_helpless = True
+
+                # Track if opponent ever gets close to ledge
+                if opponent_near_ledge:
+                    tracking_event.opponent_approached_ledge = True
 
                 # Note when player leaves ledge
                 if not player_on_ledge and tracking_event.player_left_ledge_frame is None:
@@ -99,30 +111,31 @@ class LedgehogDetector:
 
                 # Check for stock loss
                 if frame.opponent_stocks < prev_opponent_stocks:
-                    # Ledgehog confirmed!
-                    tags = ["ledgehog:basic"]
+                    # Only count as ledgehog if opponent actually approached
+                    if tracking_event.opponent_approached_ledge:
+                        tags = ["ledgehog:basic"]
 
-                    # Add strict tag if opponent was in helpless state
-                    if tracking_event.opponent_was_helpless:
-                        tags.append("ledgehog:strict")
+                        # Add strict tag if opponent was in helpless state
+                        if tracking_event.opponent_was_helpless:
+                            tags.append("ledgehog:strict")
 
-                    frame_start = max(
-                        0, tracking_event.ledge_grab_frame - self.FRAMES_BEFORE
-                    )
-                    frame_end = min(
-                        len(frames) - 1,
-                        frame.frame_number + self.FRAMES_AFTER,
-                    )
-
-                    moments.append(
-                        TaggedMoment(
-                            replay_path=replay_path,
-                            frame_start=frame_start,
-                            frame_end=frame_end,
-                            tags=tags,
-                            metadata={},
+                        frame_start = max(
+                            0, tracking_event.ledge_grab_frame - self.FRAMES_BEFORE
                         )
-                    )
+                        frame_end = min(
+                            len(frames) - 1,
+                            frame.frame_number + self.FRAMES_AFTER,
+                        )
+
+                        moments.append(
+                            TaggedMoment(
+                                replay_path=replay_path,
+                                frame_start=frame_start,
+                                frame_end=frame_end,
+                                tags=tags,
+                                metadata={},
+                            )
+                        )
                     tracking_event = None
 
                 # Cancel tracking if:

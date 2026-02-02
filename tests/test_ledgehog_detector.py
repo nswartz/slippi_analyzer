@@ -310,3 +310,118 @@ def test_strict_ledgehog_from_air_dodge() -> None:
 
     assert len(moments) == 1
     assert "ledgehog:strict" in moments[0].tags
+
+
+def test_no_ledgehog_when_opponent_far_from_ledge() -> None:
+    """No ledgehog if opponent never gets close to the ledge.
+
+    Just dying offstage while player is on ledge isn't a ledgehog.
+    The opponent must actually approach the ledge to be "hogged".
+    """
+    detector = LedgehogDetector()
+    stage_id = 2  # Fountain of Dreams
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    # Neutral frames
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id, opponent_stocks=4))
+
+    # Player grabs ledge, opponent is FAR offstage (never approaches)
+    # This simulates clip 5: "falco doesn't even come close to the ledge"
+    for i in range(100, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 80.0,  # Very far from ledge
+                opponent_y=-100.0,  # Deep offstage
+                opponent_action=ActionState.FALL,  # Just falling, not recovering
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent loses stock at frame 150 (respawns at center stage)
+    # Note: stock loss frame still has opponent far away (blast zone position)
+    frames.append(
+        make_frame(
+            150,
+            opponent_x=edge_x + 100.0,  # In blast zone when stock loss registered
+            opponent_y=-200.0,
+            opponent_stocks=3,  # Lost a stock
+            stage_id=stage_id,
+        )
+    )
+
+    # After stock loss, opponent respawns (neutral frames)
+    for i in range(151, 200):
+        frames.append(
+            make_frame(
+                i,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    # Should NOT detect a ledgehog - opponent never approached
+    assert len(moments) == 0
+
+
+def test_no_ledgehog_when_opponent_survives() -> None:
+    """No ledgehog if opponent successfully recovers.
+
+    This tests the case from user feedback where "falco survives".
+    Even if player was on ledge, if opponent lands back on stage,
+    it's not a ledgehog.
+    """
+    detector = LedgehogDetector()
+    stage_id = 2  # Fountain of Dreams
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    # Neutral frames
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id, opponent_stocks=4))
+
+    # Player grabs ledge, opponent is offstage and approaching
+    for i in range(100, 130):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 20.0,  # Close enough to be "approaching"
+                opponent_y=-30.0,
+                opponent_action=ActionState.FALL_SPECIAL,  # Recovering
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Player leaves ledge, opponent lands safely on stage
+    for i in range(130, 200):
+        frames.append(
+            make_frame(
+                i,
+                player_x=0.0,
+                player_action=ActionState.WAIT,  # Player no longer on ledge
+                opponent_x=20.0,  # Back on stage
+                opponent_y=0.0,
+                opponent_action=ActionState.WAIT,  # Standing safely
+                opponent_stocks=4,  # Still has all stocks
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    # Should NOT detect a ledgehog - opponent recovered
+    assert len(moments) == 0
