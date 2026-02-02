@@ -13,11 +13,34 @@ class ActionState:
     WAIT = 14  # Standing
     CLIFF_WAIT = 253  # Holding ledge
     CLIFF_CATCH = 252  # Grabbing ledge
-    DAMAGE_FALL = 38  # Tumble
     FALL = 29  # Falling
     FALL_SPECIAL = 35  # Helpless fall (after recovery move or air dodge)
     ESCAPE_AIR = 236  # Air dodge
-    DAMAGE_FLY_HI = 87  # Being launched diagonally up
+
+    # Damage states - opponent was hit
+    DAMAGE_HI = 75  # Hit, knocked upward
+    DAMAGE_N = 76  # Hit, knocked neutral
+    DAMAGE_LW = 77  # Hit, knocked downward
+    DAMAGE_FALL = 38  # Tumble falling
+    DAMAGE_FLY_HI = 87  # Flying from hit upward
+    DAMAGE_FLY_N = 88  # Flying from hit neutral
+    DAMAGE_FLY_LW = 89  # Flying from hit downward
+    DAMAGE_FLY_TOP = 90  # Flying from hit straight up
+    DAMAGE_FLY_ROLL = 91  # Tumbling from hit
+
+
+# Damage states that indicate opponent was hit (not a clean recovery)
+DAMAGE_STATES = {
+    ActionState.DAMAGE_HI,
+    ActionState.DAMAGE_N,
+    ActionState.DAMAGE_LW,
+    ActionState.DAMAGE_FALL,
+    ActionState.DAMAGE_FLY_HI,
+    ActionState.DAMAGE_FLY_N,
+    ActionState.DAMAGE_FLY_LW,
+    ActionState.DAMAGE_FLY_TOP,
+    ActionState.DAMAGE_FLY_ROLL,
+}
 
 
 # Stage edge x-coordinates (absolute value, edges are symmetric)
@@ -39,6 +62,7 @@ class LedgehogEvent:
     ledge_grab_frame: int
     player_left_ledge_frame: int | None = None
     opponent_reached_ledge_position: bool = False  # Did opponent get to ledge-grab position?
+    opponent_was_hit: bool = False  # Was opponent hit during recovery? (makes it ledgeguard)
 
 
 class LedgehogDetector:
@@ -47,7 +71,10 @@ class LedgehogDetector:
     A ledgehog is detected when:
     1. Player is on the ledge (CLIFF_CATCH or CLIFF_WAIT)
     2. Opponent reaches "ledge-grab position" (close to ledge, at/below ledge height)
-    3. Opponent subsequently loses a stock
+    3. Opponent has a CLEAN recovery (not hit by attacks)
+    4. Opponent subsequently loses a stock
+
+    If opponent is hit during recovery, it's a ledgeguard, not a ledgehog.
 
     This captures the essence of a ledgehog - the player taking the ledge
     when the opponent needed it to recover.
@@ -116,14 +143,21 @@ class LedgehogDetector:
                 if player_on_ledge and opponent_in_ledge_grab_position:
                     tracking_event.opponent_reached_ledge_position = True
 
+                # Track if opponent was hit during recovery (makes it a ledgeguard)
+                if frame.opponent_action_state in DAMAGE_STATES:
+                    tracking_event.opponent_was_hit = True
+
                 # Note when player leaves ledge
                 if not player_on_ledge and tracking_event.player_left_ledge_frame is None:
                     tracking_event.player_left_ledge_frame = frame.frame_number
 
                 # Check for stock loss
                 if frame.opponent_stocks < prev_opponent_stocks:
-                    # Only count as ledgehog if opponent reached ledge-grab position
-                    if tracking_event.opponent_reached_ledge_position:
+                    # Only count as ledgehog if:
+                    # - Opponent reached ledge-grab position
+                    # - Opponent was NOT hit (otherwise it's a ledgeguard)
+                    if (tracking_event.opponent_reached_ledge_position and
+                            not tracking_event.opponent_was_hit):
                         frame_start = max(
                             0, tracking_event.ledge_grab_frame - self.FRAMES_BEFORE
                         )

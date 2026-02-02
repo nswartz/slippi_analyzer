@@ -559,3 +559,83 @@ def test_no_ledgehog_when_opponent_too_high() -> None:
 
     # Should NOT detect - opponent was too high to grab ledge
     assert len(moments) == 0
+
+
+def test_no_ledgehog_when_opponent_was_hit() -> None:
+    """No ledgehog if opponent was hit during recovery (ledgeguard, not ledgehog).
+
+    This tests the case where opponent gets hit by a projectile (needle)
+    or attack while recovering. That's an edgeguard/ledgeguard, not a
+    ledgehog. A true ledgehog requires a CLEAN recovery attempt denied
+    by the player holding the ledge.
+    """
+    detector = LedgehogDetector()
+    stage_id = 2  # Fountain of Dreams
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    for i in range(100):
+        frames.append(make_frame(i, stage_id=stage_id, opponent_stocks=4))
+
+    # Player grabs ledge
+    frames.append(
+        make_frame(
+            100,
+            player_x=edge_x,
+            player_y=-10.0,
+            player_action=ActionState.CLIFF_CATCH,
+            opponent_x=edge_x + 20.0,
+            opponent_y=-20.0,
+            opponent_action=ActionState.FALL_SPECIAL,  # Recovering
+            opponent_stocks=4,
+            stage_id=stage_id,
+        )
+    )
+
+    # Opponent reaches ledge position but gets HIT (e.g., by needle)
+    for i in range(101, 110):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 10.0,  # Close to ledge
+                opponent_y=-20.0,  # At ledge height
+                opponent_action=ActionState.DAMAGE_FLY_HI,  # GOT HIT!
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent tumbles and dies
+    for i in range(110, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_x=edge_x + 30.0,
+                opponent_y=-100.0 - (i - 110) * 3,
+                opponent_action=ActionState.DAMAGE_FALL,  # Tumbling
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent dies
+    for i in range(150, 200):
+        frames.append(
+            make_frame(
+                i,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    # Should NOT detect - opponent was hit, this is a ledgeguard
+    assert len(moments) == 0
