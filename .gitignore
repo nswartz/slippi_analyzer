@@ -4,3 +4,8 @@ node_modules
 .DS_STORE
 .worktrees
 .claude
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache

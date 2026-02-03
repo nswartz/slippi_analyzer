@@ -6,6 +6,13 @@
 - Installing from existing lockfiles/manifests (npm install, pip install from pyproject.toml) is fine
 - NEVER run system-level installs (dnf, apt, brew, etc.) without asking the user first
 
+## Python Environment
+
+- ALWAYS use the project's virtual environment (`.venv/`) for Python operations
+- Run Python commands via `.venv/bin/python` or `.venv/bin/<tool>` (e.g., `.venv/bin/pytest`)
+- NEVER use `uv` or other global package managers - keep dependencies isolated in the venv
+- This is analogous to always using git worktrees: isolation prevents contamination of global/project state
+
 ## Git Workflow
 
 - There is an issue in superpowers 4.1.1 where the skills arent being run correctly. Make sure the brainstorming skill includes the following:
@@ -29,6 +36,21 @@
 ```
 
 - There are other skills with updated instructions in v4.1.2, but it is not available yet.
+
+## Code Quality
+
+- ALWAYS remove unused imports after refactoring or when pyright reports them
+- Run `.venv/bin/pyright src/` before committing to catch type errors and unused imports
+- The project uses `typeCheckingMode = "strict"` - all code must pass strict type checking
+
+## Script Usage
+
+When needing to check or verify something programmatically:
+
+1. **Prefer simple commands first** - Use existing CLI tools, grep, or direct file reads before writing scripts
+2. **Evaluate necessity** - Ask: "Can this be done with a simpler method?" before writing a bespoke script
+3. **Reusable scripts** - If a script would be useful for repeated tasks, consider adding it to `scripts/` directory with documentation
+4. **One-off checks** - For truly one-off checks, inline scripts are acceptable but keep them minimal
 
 ## Testing
 
