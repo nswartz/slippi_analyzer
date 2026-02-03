@@ -106,6 +106,7 @@ class LedgehogEvent:
     """Internal tracking for a potential ledgehog."""
 
     ledge_grab_frame: int
+    ledge_grab_frame_idx: int  # Index in frames list for technique classification
     player_left_ledge_frame: int | None = None
     opponent_reached_ledge_position: bool = False  # Did opponent get to ledge-grab position?
     opponent_reached_ledge_frame: int | None = None  # When did they reach it?
@@ -172,6 +173,71 @@ class LedgehogDetector:
     def name(self) -> str:
         return "ledgehog"
 
+    def _classify_ledge_technique(
+        self,
+        frames: list[FrameData],
+        grab_frame_idx: int,
+    ) -> str:
+        """Classify the technique used to grab the ledge.
+
+        Looks at player state before the grab to determine technique.
+
+        Args:
+            frames: List of all frame data
+            grab_frame_idx: Index of the frame where ledge was grabbed
+
+        Returns:
+            Tag suffix: "recovery", "wavedash", "ramen", "jump", or "hit"
+        """
+        if grab_frame_idx < 5:
+            return "jump"  # Not enough history, assume jump
+
+        # Look at the 30 frames before grab
+        lookback = min(30, grab_frame_idx)
+        pre_grab_frames = frames[grab_frame_idx - lookback:grab_frame_idx]
+
+        grab_frame = frames[grab_frame_idx]
+        edge_x = STAGE_EDGES.get(grab_frame.stage_id, 68.4)
+        player_side = 1 if grab_frame.player_x > 0 else -1  # 1=right edge, -1=left edge
+
+        # Check if player was in FALL_SPECIAL before grab (recovery)
+        was_in_fall_special = any(
+            f.player_action_state == ActionState.FALL_SPECIAL for f in pre_grab_frames[-15:]
+        )
+
+        # Check if player was hit recently (damage states)
+        was_hit = any(
+            f.player_action_state in DAMAGE_STATES for f in pre_grab_frames[-30:]
+        )
+
+        # Check for airdodge (wavedash/ramen)
+        had_airdodge = any(
+            f.player_action_state == ActionState.ESCAPE_AIR for f in pre_grab_frames[-10:]
+        )
+
+        # Check player position history - were they on stage before?
+        # Stage level is approximately y=0, so check y >= -5 (allows for slight variations)
+        was_on_stage = any(
+            abs(f.player_x) < edge_x - 10 and f.player_y >= -5
+            for f in pre_grab_frames[-30:]
+        )
+
+        if was_hit:
+            return "hit"
+        elif was_in_fall_special and not was_on_stage:
+            return "recovery"
+        elif had_airdodge and was_on_stage:
+            # Wavedash vs ramen: check facing relative to stage
+            # Wavedash = facing toward the edge (away from center)
+            # Ramen = facing toward center (requires turnaround)
+            # player_side is 1 for right edge, -1 for left edge
+            # player_facing is 1 for facing right, -1 for facing left
+            # Facing edge means player_facing matches player_side
+            facing_edge = (player_side * grab_frame.player_facing) > 0
+            return "wavedash" if facing_edge else "ramen"
+        else:
+            return "jump"
+
     def detect(
         self, frames: list[FrameData], replay_path: Path
     ) -> list[TaggedMoment]:
@@ -192,7 +258,7 @@ class LedgehogDetector:
         # How recently player must have been hit to count as "hit into ledge"
         HIT_INTO_LEDGE_WINDOW = 30  # 0.5 seconds
 
-        for frame in frames:
+        for frame_idx, frame in enumerate(frames):
             player_on_ledge = frame.player_action_state in (
                 ActionState.CLIFF_WAIT,
                 ActionState.CLIFF_CATCH,
@@ -244,6 +310,7 @@ class LedgehogDetector:
 
                     tracking_event = LedgehogEvent(
                         ledge_grab_frame=frame.frame_number,
+                        ledge_grab_frame_idx=frame_idx,
                         opponent_reached_ledge_position=opponent_in_ledge_grab_position,
                         opponent_reached_ledge_frame=(
                             frame.frame_number if opponent_in_ledge_grab_position else None
@@ -319,6 +386,12 @@ class LedgehogDetector:
                         for threshold, tag in self.CLUTCH_TIERS:
                             if reaction_frames <= threshold:
                                 tags.append(tag)
+
+                        # Classify the technique used to grab ledge
+                        technique = self._classify_ledge_technique(
+                            frames, tracking_event.ledge_grab_frame_idx
+                        )
+                        tags.append(f"ledgehog:{technique}")
 
                         moments.append(
                             TaggedMoment(
