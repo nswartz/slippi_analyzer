@@ -12,10 +12,12 @@ def make_frame(
     player_y: float = 0.0,
     player_action: int = 0,
     player_stocks: int = 4,
+    player_facing: int = 1,
     opponent_x: float = 0.0,
     opponent_y: float = 0.0,
     opponent_action: int = 0,
     opponent_stocks: int = 4,
+    opponent_facing: int = -1,
     stage_id: int = 2,  # Fountain of Dreams
 ) -> FrameData:
     """Helper to create FrameData for tests."""
@@ -25,10 +27,12 @@ def make_frame(
         player_y=player_y,
         player_action_state=player_action,
         player_stocks=player_stocks,
+        player_facing=player_facing,
         opponent_x=opponent_x,
         opponent_y=opponent_y,
         opponent_action_state=opponent_action,
         opponent_stocks=opponent_stocks,
+        opponent_facing=opponent_facing,
         stage_id=stage_id,
     )
 
@@ -641,3 +645,84 @@ def test_no_ledgehog_when_opponent_was_hit() -> None:
 
     # Should NOT detect - opponent was hit, this is a ledgeguard
     assert len(moments) == 0
+
+
+def test_ledgehog_classifies_wavedash_technique() -> None:
+    """Ledgehog from wavedash to ledge should be tagged as ledgehog:wavedash.
+
+    When player airdodges from on-stage to grab ledge while facing the stage,
+    it's a wavedash to ledge.
+    """
+    detector = LedgehogDetector()
+    stage_id = 2  # Fountain of Dreams
+    edge_x = STAGE_EDGES[stage_id]
+
+    frames: list[FrameData] = []
+
+    # Player on stage, neutral
+    for i in range(50):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x - 30.0,  # On stage near edge
+                player_y=0.0,
+                player_action=ActionState.WAIT,
+                player_facing=1,  # Facing right (toward ledge on right side)
+                opponent_x=edge_x + 50.0,
+                opponent_y=-50.0,
+                opponent_action=ActionState.FALL_SPECIAL,
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Player airdodges (wavedash component)
+    for i in range(50, 55):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x - 10.0 + (i - 50) * 3,  # Moving toward edge
+                player_y=-5.0,
+                player_action=ActionState.ESCAPE_AIR,  # Airdodge
+                player_facing=1,  # Facing stage (right)
+                opponent_x=edge_x + 30.0,
+                opponent_y=-50.0,
+                opponent_action=ActionState.FALL_SPECIAL,
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Player grabs ledge from wavedash
+    for i in range(55, 100):
+        frames.append(
+            make_frame(
+                i,
+                player_x=edge_x,
+                player_y=-10.0,
+                player_action=ActionState.CLIFF_CATCH,
+                player_facing=1,  # Facing stage
+                opponent_x=edge_x + 10.0,  # Opponent reaches ledge grab position
+                opponent_y=-10.0,
+                opponent_action=ActionState.FALL_SPECIAL,
+                opponent_stocks=4,
+                stage_id=stage_id,
+            )
+        )
+
+    # Opponent dies
+    for i in range(100, 150):
+        frames.append(
+            make_frame(
+                i,
+                player_action=ActionState.CLIFF_WAIT,
+                opponent_stocks=3,
+                stage_id=stage_id,
+            )
+        )
+
+    moments = detector.detect(frames, Path("/test.slp"))
+
+    assert len(moments) == 1
+    assert "ledgehog" in moments[0].tags
+    assert "ledgehog:wavedash" in moments[0].tags

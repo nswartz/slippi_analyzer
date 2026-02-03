@@ -78,10 +78,12 @@ def test_registry_run_all_detectors() -> None:
             player_y=0.0,
             player_action_state=0,
             player_stocks=4,
+            player_facing=1,
             opponent_x=0.0,
             opponent_y=0.0,
             opponent_action_state=0,
             opponent_stocks=4,
+            opponent_facing=-1,
             stage_id=31,
         )
         for i in range(10)

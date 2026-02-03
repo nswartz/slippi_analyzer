@@ -157,6 +157,11 @@ def parse_replay_to_frames(
             if player_post is None or opp_post is None:
                 continue
 
+            # Extract facing direction (1=right, -1=left)
+            # Direction is an IntEnum but slippi's stubs don't type it properly
+            player_facing: int = int(player_post.direction)  # type: ignore[arg-type]
+            opponent_facing: int = int(opp_post.direction)  # type: ignore[arg-type]
+
             frames.append(
                 FrameData(
                     frame_number=frame.index,
@@ -164,10 +169,12 @@ def parse_replay_to_frames(
                     player_y=player_post.position.y,
                     player_action_state=player_post.state,
                     player_stocks=player_post.stocks,
+                    player_facing=player_facing,
                     opponent_x=opp_post.position.x,
                     opponent_y=opp_post.position.y,
                     opponent_action_state=opp_post.state,
                     opponent_stocks=opp_post.stocks,
+                    opponent_facing=opponent_facing,
                     stage_id=stage_id,
                 )
             )
