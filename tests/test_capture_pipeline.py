@@ -10,6 +10,9 @@ from src.models import TaggedMoment
 
 def test_pipeline_captures_single_moment(tmp_path: Path) -> None:
     """Pipeline captures a single moment through Dolphin and FFmpeg."""
+    from src.capture.dolphin import DolphinController, DolphinConfig
+    from src.capture.ffmpeg import FFmpegEncoder
+
     moment = TaggedMoment(
         replay_path=Path("/replays/game.slp"),
         frame_start=1000,
@@ -20,33 +23,46 @@ def test_pipeline_captures_single_moment(tmp_path: Path) -> None:
 
     output_dir = tmp_path / "clips"
 
-    with patch("src.capture.pipeline.DolphinController") as mock_dolphin, \
-         patch("src.capture.pipeline.FFmpegEncoder") as mock_ffmpeg:
+    def mock_start_capture(self: DolphinController, **kwargs: object) -> None:
+        output_dir = kwargs.get("output_dir")
+        if output_dir is not None:
+            self._output_dir = output_dir if isinstance(output_dir, Path) else Path(str(output_dir))
+            # Create frame dump files like Dolphin would
+            (self._output_dir / "Frames").mkdir(parents=True, exist_ok=True)
+            (self._output_dir / "Audio").mkdir(parents=True, exist_ok=True)
+            (self._output_dir / "Frames" / "framedump0.avi").touch()
+            (self._output_dir / "Audio" / "dspdump.wav").touch()
 
-        # Setup mocks
-        mock_dolphin_instance = MagicMock()
-        mock_dolphin.return_value = mock_dolphin_instance
-        mock_dolphin_instance.wait_for_completion.return_value = 0
+    encode_called = False
 
-        mock_ffmpeg_instance = MagicMock()
-        mock_ffmpeg.return_value = mock_ffmpeg_instance
+    def mock_encode_avi(self: FFmpegEncoder, **kwargs: object) -> None:
+        nonlocal encode_called
+        encode_called = True
 
-        pipeline = CapturePipeline(output_dir=output_dir)
-        result = pipeline.capture_moment(moment, index=1)
+    with patch.object(DolphinController, "start_capture", mock_start_capture):
+        with patch.object(DolphinController, "wait_for_completion", return_value=0):
+            with patch.object(DolphinController, "get_active_window", return_value="12345"):
+                with patch.object(FFmpegEncoder, "encode_avi", mock_encode_avi):
+                    with patch("src.capture.pipeline.write_sidecar_file"):
+                        pipeline = CapturePipeline(
+                            output_dir=output_dir,
+                            dolphin_config=DolphinConfig(),
+                        )
+                        result = pipeline.capture_moment(moment, index=1)
 
-        # Verify Dolphin was called
-        mock_dolphin_instance.start_capture.assert_called_once()
+    # Verify FFmpeg was called to encode AVI to MP4
+    assert encode_called, "encode_avi should be called"
 
-        # Verify FFmpeg was called to encode AVI to MP4
-        mock_ffmpeg_instance.encode_avi.assert_called_once()
-
-        # Should return output path
-        assert result is not None
-        assert result.suffix == ".mp4"
+    # Should return output path
+    assert result is not None
+    assert result.suffix == ".mp4"
 
 
 def test_pipeline_captures_multiple_moments(tmp_path: Path) -> None:
     """Pipeline captures multiple moments with fresh Dolphin per clip (batch mode)."""
+    from src.capture.dolphin import DolphinController, DolphinConfig
+    from src.capture.ffmpeg import FFmpegEncoder
+
     moments = [
         TaggedMoment(
             replay_path=Path(f"/replays/game{i}.slp"),
@@ -59,26 +75,40 @@ def test_pipeline_captures_multiple_moments(tmp_path: Path) -> None:
     ]
 
     output_dir = tmp_path / "clips"
+    start_capture_count = 0
 
-    with patch("src.capture.pipeline.DolphinController") as mock_dolphin, \
-         patch("src.capture.pipeline.FFmpegEncoder") as mock_ffmpeg:
+    def mock_start_capture(self: DolphinController, **kwargs: object) -> None:
+        nonlocal start_capture_count
+        start_capture_count += 1
+        output_dir = kwargs.get("output_dir")
+        if output_dir is not None:
+            self._output_dir = output_dir if isinstance(output_dir, Path) else Path(str(output_dir))
+            # Create frame dump files like Dolphin would
+            (self._output_dir / "Frames").mkdir(parents=True, exist_ok=True)
+            (self._output_dir / "Audio").mkdir(parents=True, exist_ok=True)
+            (self._output_dir / "Frames" / "framedump0.avi").touch()
+            (self._output_dir / "Audio" / "dspdump.wav").touch()
 
-        mock_dolphin_instance = MagicMock()
-        mock_dolphin.return_value = mock_dolphin_instance
-        mock_dolphin_instance.wait_for_completion.return_value = 0
+    def mock_encode_avi_async(self: FFmpegEncoder, **kwargs: object) -> "Future[None]":
+        future: Future[None] = Future()
+        future.set_result(None)
+        return future
 
-        mock_ffmpeg_instance = MagicMock()
-        mock_ffmpeg.return_value = mock_ffmpeg_instance
+    with patch.object(DolphinController, "start_capture", mock_start_capture):
+        with patch.object(DolphinController, "wait_for_completion", return_value=0):
+            with patch.object(DolphinController, "get_active_window", return_value="12345"):
+                with patch.object(FFmpegEncoder, "encode_avi_async", mock_encode_avi_async):
+                    with patch("src.capture.pipeline.write_sidecar_file"):
+                        pipeline = CapturePipeline(
+                            output_dir=output_dir,
+                            dolphin_config=DolphinConfig(),
+                        )
+                        results = pipeline.capture_moments(moments)
 
-        pipeline = CapturePipeline(output_dir=output_dir)
-        results = pipeline.capture_moments(moments)
-
-        # All 3 should be captured
-        assert len(results) == 3
-        # Should launch fresh Dolphin for each clip (batch mode required for frame dumping)
-        assert mock_dolphin_instance.start_capture.call_count == 3
-        # No reload - persistent mode doesn't dump frames
-        assert mock_dolphin_instance.reload_replay.call_count == 0
+    # All 3 should be captured
+    assert len(results) == 3
+    # Should launch fresh Dolphin for each clip (batch mode required for frame dumping)
+    assert start_capture_count == 3
 
 
 def test_pipeline_handles_dolphin_failure(tmp_path: Path) -> None:
@@ -283,3 +313,102 @@ def test_capture_moments_uses_async_encoding(tmp_path: Path) -> None:
     assert encode_sync_calls == 0, f"Expected 0 encode_avi calls, got {encode_sync_calls}"
     # Should return 3 results
     assert len(results) == 3
+
+
+def test_capture_moments_skips_encoding_when_video_file_missing(tmp_path: Path) -> None:
+    """capture_moments skips encoding if Dolphin didn't create frame dump."""
+    from src.capture.dolphin import DolphinController, DolphinConfig
+    from src.capture.ffmpeg import FFmpegEncoder
+
+    encode_calls = 0
+
+    def mock_start_capture(self: DolphinController, **kwargs: object) -> None:
+        # Don't create any output files - simulating failed frame dump
+        output_dir = kwargs.get("output_dir")
+        if output_dir is not None:
+            self._output_dir = output_dir if isinstance(output_dir, Path) else Path(str(output_dir))
+            # Create the directories but NOT the frame dump file
+            (self._output_dir / "Frames").mkdir(parents=True, exist_ok=True)
+            (self._output_dir / "Audio").mkdir(parents=True, exist_ok=True)
+            # Note: framedump0.avi is NOT created
+
+    def mock_encode_avi_async(self: FFmpegEncoder, **kwargs: object) -> "Future[None]":
+        nonlocal encode_calls
+        encode_calls += 1
+        future: Future[None] = Future()
+        future.set_result(None)
+        return future
+
+    with patch.object(DolphinController, "start_capture", mock_start_capture):
+        with patch.object(DolphinController, "wait_for_completion", return_value=0):
+            with patch.object(DolphinController, "get_active_window", return_value="12345"):
+                with patch.object(FFmpegEncoder, "encode_avi_async", mock_encode_avi_async):
+                    with patch("src.capture.pipeline.write_sidecar_file"):
+                        pipeline = CapturePipeline(
+                            output_dir=tmp_path / "clips",
+                            dolphin_config=DolphinConfig(),
+                        )
+
+                        moments = [
+                            TaggedMoment(
+                                replay_path=Path("/tmp/test.slp"),
+                                frame_start=100,
+                                frame_end=200,
+                                tags=["test"],
+                                metadata={"date": "2025-01-01", "stage": "bf", "player": "fox"},
+                            )
+                        ]
+
+                        results = pipeline.capture_moments(moments)
+
+    # Encoding should NOT be called if video file doesn't exist
+    assert encode_calls == 0, f"Expected 0 encode calls when video missing, got {encode_calls}"
+    # Should return empty results
+    assert len(results) == 0, f"Expected 0 results when video missing, got {len(results)}"
+
+
+def test_capture_moment_returns_none_when_video_file_missing(tmp_path: Path) -> None:
+    """capture_moment returns None if Dolphin didn't create frame dump."""
+    from src.capture.dolphin import DolphinController, DolphinConfig
+    from src.capture.ffmpeg import FFmpegEncoder
+
+    encode_calls = 0
+
+    def mock_start_capture(self: DolphinController, **kwargs: object) -> None:
+        # Don't create any output files - simulating failed frame dump
+        output_dir = kwargs.get("output_dir")
+        if output_dir is not None:
+            self._output_dir = output_dir if isinstance(output_dir, Path) else Path(str(output_dir))
+            # Create the directories but NOT the frame dump file
+            (self._output_dir / "Frames").mkdir(parents=True, exist_ok=True)
+            (self._output_dir / "Audio").mkdir(parents=True, exist_ok=True)
+            # Note: framedump0.avi is NOT created
+
+    def mock_encode_avi(self: FFmpegEncoder, **kwargs: object) -> None:
+        nonlocal encode_calls
+        encode_calls += 1
+
+    with patch.object(DolphinController, "start_capture", mock_start_capture):
+        with patch.object(DolphinController, "wait_for_completion", return_value=0):
+            with patch.object(DolphinController, "get_active_window", return_value="12345"):
+                with patch.object(FFmpegEncoder, "encode_avi", mock_encode_avi):
+                    with patch("src.capture.pipeline.write_sidecar_file"):
+                        pipeline = CapturePipeline(
+                            output_dir=tmp_path / "clips",
+                            dolphin_config=DolphinConfig(),
+                        )
+
+                        moment = TaggedMoment(
+                            replay_path=Path("/tmp/test.slp"),
+                            frame_start=100,
+                            frame_end=200,
+                            tags=["test"],
+                            metadata={"date": "2025-01-01", "stage": "bf", "player": "fox"},
+                        )
+
+                        result = pipeline.capture_moment(moment, index=1)
+
+    # Encoding should NOT be called if video file doesn't exist
+    assert encode_calls == 0, f"Expected 0 encode calls when video missing, got {encode_calls}"
+    # Should return None
+    assert result is None, f"Expected None when video missing, got {result}"

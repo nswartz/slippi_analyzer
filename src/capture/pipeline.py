@@ -72,6 +72,11 @@ class CapturePipeline:
             video_file = frame_dir / "Frames" / "framedump0.avi"
             audio_file = frame_dir / "Audio" / "dspdump.wav"
 
+            # Return None if frame dump wasn't created
+            if not video_file.exists():
+                print(f"Warning: Frame dump not created for {moment.replay_path}")
+                return None
+
             # Generate output filename
             filename = generate_clip_filename(moment, index)
             output_path = self.output_dir / filename
@@ -136,6 +141,12 @@ class CapturePipeline:
             # Find Dolphin's output files
             video_file = frame_dir / "Frames" / "framedump0.avi"
             audio_file = frame_dir / "Audio" / "dspdump.wav"
+
+            # Skip if frame dump wasn't created (Dolphin may not have dumped frames)
+            if not video_file.exists():
+                print(f"Warning: Frame dump not created for {moment.replay_path}")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                continue
 
             # Generate output filename
             filename = generate_clip_filename(moment, i)
