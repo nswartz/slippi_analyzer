@@ -14,15 +14,19 @@ def test_frame_data_structure() -> None:
         player_y=0.0,
         player_action_state=0,
         player_stocks=4,
+        player_facing=1,
         opponent_x=-50.0,
         opponent_y=-100.0,
         opponent_action_state=185,  # Example: Fall
         opponent_stocks=3,
+        opponent_facing=-1,
         stage_id=2,  # Fountain of Dreams
     )
 
     assert frame.frame_number == 100
     assert frame.opponent_stocks == 3
+    assert frame.player_facing == 1
+    assert frame.opponent_facing == -1
 
 
 def test_detector_protocol_compliance() -> None:

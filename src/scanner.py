@@ -157,6 +157,10 @@ def parse_replay_to_frames(
             if player_post is None or opp_post is None:
                 continue
 
+            # Extract facing direction (1=right, -1=left)
+            player_facing = player_post.direction.value
+            opponent_facing = opp_post.direction.value
+
             frames.append(
                 FrameData(
                     frame_number=frame.index,
@@ -164,10 +168,12 @@ def parse_replay_to_frames(
                     player_y=player_post.position.y,
                     player_action_state=player_post.state,
                     player_stocks=player_post.stocks,
+                    player_facing=player_facing,
                     opponent_x=opp_post.position.x,
                     opponent_y=opp_post.position.y,
                     opponent_action_state=opp_post.state,
                     opponent_stocks=opp_post.stocks,
+                    opponent_facing=opponent_facing,
                     stage_id=stage_id,
                 )
             )

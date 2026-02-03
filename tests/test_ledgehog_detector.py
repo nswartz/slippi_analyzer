@@ -12,10 +12,12 @@ def make_frame(
     player_y: float = 0.0,
     player_action: int = 0,
     player_stocks: int = 4,
+    player_facing: int = 1,
     opponent_x: float = 0.0,
     opponent_y: float = 0.0,
     opponent_action: int = 0,
     opponent_stocks: int = 4,
+    opponent_facing: int = -1,
     stage_id: int = 2,  # Fountain of Dreams
 ) -> FrameData:
     """Helper to create FrameData for tests."""
@@ -25,10 +27,12 @@ def make_frame(
         player_y=player_y,
         player_action_state=player_action,
         player_stocks=player_stocks,
+        player_facing=player_facing,
         opponent_x=opponent_x,
         opponent_y=opponent_y,
         opponent_action_state=opponent_action,
         opponent_stocks=opponent_stocks,
+        opponent_facing=opponent_facing,
         stage_id=stage_id,
     )
 

@@ -76,6 +76,24 @@ def test_frame_data_tracks_stocks() -> None:
     assert frames[0].opponent_stocks == 4
 
 
+def test_frame_data_tracks_facing_direction() -> None:
+    """FrameData should include player and opponent facing direction."""
+    replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
+    if not replay_path.exists():
+        pytest.skip("Test fixture not available")
+
+    result = parse_replay_to_frames(replay_path, player_port=0)
+    frames = next(iter(result.values()))
+
+    # Check that facing direction is present
+    assert hasattr(frames[0], "player_facing")
+    assert hasattr(frames[0], "opponent_facing")
+
+    # Facing should be -1 (left) or 1 (right)
+    assert frames[0].player_facing in (-1, 1)
+    assert frames[0].opponent_facing in (-1, 1)
+
+
 def test_replay_scanner_extracts_metadata() -> None:
     """ReplayScanner extracts metadata from replay."""
     replay_path = Path("tests/fixtures/Game_20251114T001152.slp")
