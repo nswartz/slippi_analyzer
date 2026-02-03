@@ -1,0 +1,6 @@
+py-slippi>=1.6.0
+click>=8.0.0
+
+[dev]
+pytest>=7.0.0
+pyright>=1.1.0

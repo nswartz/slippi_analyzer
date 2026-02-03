@@ -1,75 +1,69 @@
-# Project Rules
+# Slippi Clip Analyzer
 
-## General
+A tool for scanning Super Smash Bros. Melee replay files (.slp) to detect gameplay moments (ledgehogs, combos, etc.) and capture video clips via Dolphin frame dumps.
 
-- REQUIRED: ensure any created/dispatched sub-agents understand these rules.
-- Installing from existing lockfiles/manifests (npm install, pip install from pyproject.toml) is fine
-- NEVER run system-level installs (dnf, apt, brew, etc.) without asking the user first
+## Project Structure
+
+```
+src/
+├── cli.py           # Click CLI: scan, find, capture, compile commands
+├── scanner.py       # Replay parsing and parallel scanning
+├── database.py      # SQLite storage for replays/moments/tags
+├── config.py        # TOML config (~/.config/slippi-clip/config.toml)
+├── models.py        # TaggedMoment, FrameData dataclasses
+├── detectors/       # Moment detection plugins
+│   ├── base.py      # BaseDetector protocol, DetectorRegistry
+│   └── ledgehog.py  # Ledgehog detection with timing tags
+└── capture/         # Video capture pipeline
+    ├── pipeline.py  # Orchestrates Dolphin + ffmpeg
+    ├── dolphin.py   # Slippi Dolphin controller
+    └── ffmpeg.py    # AVI→MP4 encoding
+```
 
 ## Python Environment
 
 - ALWAYS use the project's virtual environment (`.venv/`) for Python operations
 - Run Python commands via `.venv/bin/python` or `.venv/bin/<tool>` (e.g., `.venv/bin/pytest`)
 - NEVER use `uv` or other global package managers - keep dependencies isolated in the venv
-- This is analogous to always using git worktrees: isolation prevents contamination of global/project state
-
-## Git Workflow
-
-- There is an issue in superpowers 4.1.1 where the skills arent being run correctly. Make sure the brainstorming skill includes the following:
-
-```md
-## Remember
-
-- Review plan critically first
-- Follow plan steps exactly
-- Don't skip verifications
-- Reference skills when plan says to
-- Between batches: just report and wait
-- Stop when blocked, don't guess
-- Never start implementation on main/master branch without explicit user consent
-
-## Integration
-
-**Required workflow skills:**
-
-- **superpowers:using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
-```
-
-- There are other skills with updated instructions in v4.1.2, but it is not available yet.
 
 ## Code Quality
 
-- ALWAYS remove unused imports after refactoring or when pyright reports them
 - Run `.venv/bin/pyright src/` before committing to catch type errors and unused imports
 - The project uses `typeCheckingMode = "strict"` - all code must pass strict type checking
+- ALWAYS remove unused imports after refactoring
 
-## Script Usage
+## Testing Guidelines
 
-When needing to check or verify something programmatically:
-
-1. **Prefer simple commands first** - Use existing CLI tools, grep, or direct file reads before writing scripts
-2. **Evaluate necessity** - Ask: "Can this be done with a simpler method?" before writing a bespoke script
-3. **Reusable scripts** - If a script would be useful for repeated tasks, consider adding it to `scripts/` directory with documentation
-4. **One-off checks** - For truly one-off checks, inline scripts are acceptable but keep them minimal
-
-## Testing
-
-- REQUIRED: Use `superpowers:test-driven-development` skill for all implementation work
-- After invoking the TDD skill, create the marker file: `touch /tmp/.superpowers-tdd-session-$(date +%Y%m%d)`
-  - A PreToolUse hook blocks edits to production code until this marker exists
-- Write tests first, then implementation (red-green-refactor)
+Project-specific test coverage:
 - Unit tests for all logic: detectors, clip boundaries, database operations, filename generation
-- No snapshot tests
 - Skip tests for non-logic code (HTML templates, static config, etc.)
 - Integration tests for capture pipeline (with mocked Dolphin/ffmpeg)
 
-## Attribution
+## Data Locations
 
-When crediting Claude Code as author, co-author, or generator of code, PRs, commits, or features, always frame it as a human using Claude as a tool. Never imply Claude acted autonomously.
+- Database: `~/.local/share/slippi-clip/moments.db`
+- Config: `~/.config/slippi-clip/config.toml`
+- Dolphin profile: `~/.local/share/slippi-clip/dolphin/`
 
-Examples:
+## Key Dependencies
 
-- ✓ "Created by Noah Swartz using Claude Code"
-- ✓ "Noah Swartz built this with Claude Code"
-- ✗ "Generated with Claude Code" (implies autonomous generation)
-- ✗ "Co-Authored-By: Claude" (implies equal authorship)
+- `py-slippi>=2.0.0` - Replay file parsing
+- `click>=8.0.0` - CLI framework
+
+## CLI Commands
+
+```bash
+slippi-clip scan /path/to/replays    # Parse replays, detect moments
+slippi-clip find --tag ledgehog      # Query moments by tag
+slippi-clip capture --tag ledgehog   # Render clips via Dolphin
+slippi-clip compile clips/ -o out.mp4  # Concatenate clips
+```
+
+## Ledgehog Detection
+
+Tags are hierarchical - all ledgehogs get the base tag, clutch variants add timing info:
+- `ledgehog` - Any ledgehog (opponent grabbed ledge within 120 frames of player)
+- `ledgehog:clutch` - Reaction within 60 frames
+- `ledgehog:clutch:30`, `:15`, `:10`, `:5`, `:1` - Tighter timing windows
+
+Technique tags: `ledgehog:wavedash`, `ledgehog:ramen`, `ledgehog:jump`, `ledgehog:recovery`

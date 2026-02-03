@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Scan Slippi replays for gameplay moments and capture video clips"
 requires-python = ">=3.10"
 dependencies = [
-    "py-slippi>=2.0.0",
+    "py-slippi>=1.6.0",
     "click>=8.0.0",
 ]
 

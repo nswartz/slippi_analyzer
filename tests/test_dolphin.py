@@ -41,18 +41,17 @@ def test_build_dolphin_command() -> None:
     cmd = build_dolphin_command(
         config=config,
         playback_config_path=Path("/home/user/.dolphin-slippi/Slippi/playback.txt"),
-        output_dir=Path("/tmp/frames"),
     )
 
     assert "/usr/bin/dolphin-emu" in cmd[0]
     assert "-u" in cmd  # User directory
     assert "-i" in cmd  # Playback config flag
-    assert "-b" in cmd  # Batch mode flag
+    assert "-b" not in cmd  # Batch mode disabled by default (breaks frame dumping)
     assert "--cout" in cmd  # Console output for frame tracking
 
 
 def test_dolphin_controller_setup_dump_config(tmp_path: Path) -> None:
-    """DolphinController sets up frame dump configuration."""
+    """DolphinController sets up frame dump directories."""
     user_dir = tmp_path / "dolphin"
     user_dir.mkdir()
 
@@ -64,86 +63,87 @@ def test_dolphin_controller_setup_dump_config(tmp_path: Path) -> None:
     controller = DolphinController(config)
     controller.setup_frame_dump(output_dir=tmp_path / "frames")
 
-    # Check that config file was created/modified
-    gfx_ini = user_dir / "Config" / "GFX.ini"
-    assert gfx_ini.exists()
+    # Check that Dump directories were created
+    dump_frames = user_dir / "Dump" / "Frames"
+    dump_audio = user_dir / "Dump" / "Audio"
+    assert dump_frames.exists(), "Dump/Frames directory should be created"
+    assert dump_audio.exists(), "Dump/Audio directory should be created"
 
-    content = gfx_ini.read_text().lower()
-    assert "internalresolutionframedumps" in content
 
-
-def test_setup_frame_dump_preserves_case(tmp_path: Path) -> None:
-    """GFX.ini option names must preserve CamelCase for Dolphin compatibility."""
+def test_setup_frame_dump_creates_gecko_code(tmp_path: Path) -> None:
+    """setup_frame_dump creates Gecko code for music muting when enabled."""
     user_dir = tmp_path / "dolphin"
     user_dir.mkdir()
 
     config = DolphinConfig(
         executable=Path("/usr/bin/dolphin-emu"),
         user_dir=user_dir,
+        mute_music=True,
     )
 
     controller = DolphinController(config)
     output_dir = tmp_path / "frames"
     controller.setup_frame_dump(output_dir=output_dir)
 
-    gfx_ini = user_dir / "Config" / "GFX.ini"
-    content = gfx_ini.read_text()
+    # Check that Gecko code file was created for Melee
+    gecko_ini = user_dir / "GameSettings" / "GALE01.ini"
+    assert gecko_ini.exists(), "Gecko code file should be created"
 
-    # Dolphin requires CamelCase keys - lowercase won't work
-    assert "InternalResolutionFrameDumps" in content, f"Expected InternalResolutionFrameDumps in: {content}"
+    content = gecko_ini.read_text()
+    assert "Netplay Safe Kill Music" in content, f"Expected music mute code in: {content}"
 
 
-def test_setup_frame_dump_configures_dolphin_ini(tmp_path: Path) -> None:
-    """setup_frame_dump enables DumpFramesSilent in Dolphin.ini for batch mode."""
+def test_setup_frame_dump_skips_gecko_when_mute_disabled(tmp_path: Path) -> None:
+    """setup_frame_dump skips Gecko code when mute_music is False."""
     user_dir = tmp_path / "dolphin"
     user_dir.mkdir()
 
     config = DolphinConfig(
         executable=Path("/usr/bin/dolphin-emu"),
         user_dir=user_dir,
+        mute_music=False,
     )
 
     controller = DolphinController(config)
     output_dir = tmp_path / "frames"
     controller.setup_frame_dump(output_dir=output_dir)
 
-    dolphin_ini = user_dir / "Config" / "Dolphin.ini"
-    assert dolphin_ini.exists(), "Dolphin.ini should be created"
+    # Check that Gecko code file was NOT created
+    gecko_ini = user_dir / "GameSettings" / "GALE01.ini"
+    assert not gecko_ini.exists(), "Gecko code file should not be created when mute_music=False"
 
-    content = dolphin_ini.read_text()
-
-    # Must enable silent dump for batch mode
-    assert "DumpFrames = True" in content, f"Expected DumpFrames in: {content}"
-    assert "DumpFramesSilent = True" in content, f"Expected DumpFramesSilent in: {content}"
-
-    # DSP section must enable audio dump
-    assert "[DSP]" in content, f"Expected DSP section in: {content}"
-    assert "DumpAudio = True" in content, f"Expected DumpAudio in: {content}"
-    assert "DumpAudioSilent = True" in content, f"Expected DumpAudioSilent in: {content}"
+    # But dump directories should still be created
+    dump_frames = user_dir / "Dump" / "Frames"
+    assert dump_frames.exists(), "Dump/Frames should still be created"
 
 
-def test_setup_frame_dump_disables_image_dump(tmp_path: Path) -> None:
-    """setup_frame_dump sets DumpFramesAsImages = False to get AVI output.
+def test_build_dolphin_command_batch_mode(tmp_path: Path) -> None:
+    """build_dolphin_command adds -b flag when batch_mode=True.
 
-    By default, Dolphin may dump individual PNG frames. We need AVI for encoding.
+    Note: batch_mode disables frame dumping in Slippi Playback, so it should
+    only be used for non-capture scenarios.
     """
-    user_dir = tmp_path / "dolphin"
-    user_dir.mkdir()
-
     config = DolphinConfig(
         executable=Path("/usr/bin/dolphin-emu"),
-        user_dir=user_dir,
+        user_dir=tmp_path,
+        iso_path=Path("/games/melee.iso"),
     )
 
-    controller = DolphinController(config)
-    output_dir = tmp_path / "frames"
-    controller.setup_frame_dump(output_dir=output_dir)
+    # With batch_mode=True
+    cmd_batch = build_dolphin_command(
+        config=config,
+        playback_config_path=tmp_path / "playback.txt",
+        batch_mode=True,
+    )
+    assert "-b" in cmd_batch, "Should have -b flag with batch_mode=True"
 
-    gfx_ini = user_dir / "Config" / "GFX.ini"
-    content = gfx_ini.read_text()
-
-    # Must disable image dump to get AVI output
-    assert "DumpFramesAsImages = False" in content, f"Expected DumpFramesAsImages = False in: {content}"
+    # With batch_mode=False (default)
+    cmd_normal = build_dolphin_command(
+        config=config,
+        playback_config_path=tmp_path / "playback.txt",
+        batch_mode=False,
+    )
+    assert "-b" not in cmd_normal, "Should not have -b flag with batch_mode=False"
 
 
 def test_wait_for_completion_monitors_file_size(tmp_path: Path) -> None:
