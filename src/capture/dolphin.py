@@ -1,6 +1,5 @@
 """Dolphin emulator automation for frame dumping."""
 
-import configparser
 import json
 import shutil
 import subprocess
@@ -29,17 +28,17 @@ class DolphinConfig:
 def build_dolphin_command(
     config: DolphinConfig,
     playback_config_path: Path,
-    output_dir: Path,
-    batch_mode: bool = True,
+    batch_mode: bool = False,
 ) -> list[str]:
     """Build command to launch Slippi Playback for frame dumping.
 
     Args:
         config: Dolphin configuration
         playback_config_path: Path to playback.txt config file
-        output_dir: Directory for frame dump output
-        batch_mode: If True, Dolphin exits after replay ends. Set False for
-            persistent sessions where replays are reloaded via commandId.
+        batch_mode: If True, Dolphin exits after replay ends. WARNING: batch
+            mode (-b flag) DISABLES frame dumping in Slippi Playback! Leave
+            False (default) for frame capture - Dolphin will be terminated
+            by wait_for_completion() after the dump file stabilizes.
 
     Returns:
         Command as list of strings
@@ -53,15 +52,16 @@ def build_dolphin_command(
         cmd.extend(["-e", str(config.iso_path)])
 
     # Slippi Playback specific arguments
+    # NOTE: Don't use --output-directory - it may conflict with frame dumping.
+    # Dumps go to user_dir/Dump/ instead.
     cmd.extend([
         "-i", str(playback_config_path),  # Playback config file
-        "--output-directory", str(output_dir),
         "--hide-seekbar",  # Hide seekbar during playback
         "--cout",  # Enable console output for frame tracking
     ])
 
     # Batch mode causes Dolphin to exit after replay ends
-    # Disable for persistent sessions where we reload replays via commandId
+    # WARNING: -b flag DISABLES frame dumping! Only use for non-capture scenarios.
     if batch_mode:
         cmd.append("-b")
 
@@ -110,7 +110,7 @@ class DolphinController:
 
     def __init__(self, config: DolphinConfig) -> None:
         self.config = config
-        self._process: subprocess.Popen[str] | None = None
+        self._process: subprocess.Popen[bytes] | None = None
         self._original_window: str | None = None
         self._minimize_thread: threading.Thread | None = None
         self._stop_minimize_thread = threading.Event()
@@ -133,15 +133,24 @@ class DolphinController:
         return None
 
     def _kill_existing_dolphin(self) -> None:
-        """Kill any existing Dolphin processes before starting a new capture.
+        """Kill any existing Slippi Dolphin emulator processes before starting a new capture.
 
         This prevents issues where a lingering Dolphin window from a previous
         run interferes with launching a new instance.
+
+        IMPORTANT: Only targets Slippi emulator, NOT the KDE Dolphin file manager.
+        The KDE file manager is /usr/bin/dolphin, while Slippi runs from AppImage.
         """
         try:
-            # Use pkill to terminate any dolphin processes
-            # Try multiple patterns since the AppImage may have different process names
-            for pattern in ["dolphin", "Slippi"]:
+            # Only kill Slippi emulator processes, NOT the KDE Dolphin file manager
+            # Slippi runs from AppImage with "Slippi" in the path or as mounted AppImage
+            # The KDE file manager is /usr/bin/dolphin and should NOT be killed
+            slippi_patterns = [
+                "Slippi_Playback",  # AppImage name
+                "Slippi.*AppImage",  # AppImage with Slippi
+                r"\.mount_Slippi",  # Mounted AppImage temp directory
+            ]
+            for pattern in slippi_patterns:
                 subprocess.run(
                     ["pkill", "-f", pattern],
                     capture_output=True,
@@ -367,74 +376,28 @@ $Netplay Safe Kill Music
             f.write(gecko_content)
 
     def setup_frame_dump(self, output_dir: Path) -> None:
-        """Configure Dolphin for frame dumping.
+        """Prepare directories for frame dumping.
 
-        Modifies GFX.ini to enable frame dumping.
+        NOTE: This method intentionally does NOT modify Dolphin.ini or GFX.ini.
+        The user_dir should be pre-configured with correct settings (copy from
+        Slippi Launcher config). Using configparser to rewrite INI files corrupts
+        them in ways that break Dolphin's frame dumping.
+
+        Only sets up:
+        - Dump directories (Frames/ and Audio/)
+        - Gecko codes for music muting (if enabled)
         """
         if self.config.user_dir is None:
             raise ValueError("user_dir must be set to configure frame dump")
 
-        config_dir = self.config.user_dir / "Config"
-        config_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure Dump directories exist
+        dump_dir = self.config.user_dir / "Dump"
+        (dump_dir / "Frames").mkdir(parents=True, exist_ok=True)
+        (dump_dir / "Audio").mkdir(parents=True, exist_ok=True)
 
-        gfx_ini_path = config_dir / "GFX.ini"
-
-        # Parse existing config or create new
-        # Preserve case for option names - Dolphin requires CamelCase
-        gfx_config = configparser.ConfigParser()
-        gfx_config.optionxform = str  # type: ignore[assignment]
-        if gfx_ini_path.exists():
-            gfx_config.read(gfx_ini_path)
-
-        # Ensure Settings section exists
-        if "Settings" not in gfx_config:
-            gfx_config["Settings"] = {}
-
-        # Enable video frame dumping at internal resolution (for quality)
-        gfx_config["Settings"]["InternalResolutionFrameDumps"] = "True"
-        # Dump as AVI, not individual PNG frames
-        gfx_config["Settings"]["DumpFramesAsImages"] = "False"
-        # Set output directory for frame dumps (--output-directory flag is unreliable)
-        gfx_config["Settings"]["DumpPath"] = str(output_dir)
-
-        # Create the output directories that Dolphin expects
-        # Dolphin creates Frames/ and Audio/ subdirectories under DumpPath
-        (output_dir / "Frames").mkdir(parents=True, exist_ok=True)
-        (output_dir / "Audio").mkdir(parents=True, exist_ok=True)
-
-        # Write config
-        with open(gfx_ini_path, "w") as f:
-            gfx_config.write(f)
-
-        # Also configure Dolphin.ini for silent batch mode dumping
-        dolphin_ini_path = config_dir / "Dolphin.ini"
-        dolphin_config = configparser.ConfigParser()
-        dolphin_config.optionxform = str  # type: ignore[assignment]
-        if dolphin_ini_path.exists():
-            dolphin_config.read(dolphin_ini_path)
-
-        if "Movie" not in dolphin_config:
-            dolphin_config["Movie"] = {}
-
-        # Enable silent dump for batch mode (no GUI prompts)
-        dolphin_config["Movie"]["DumpFrames"] = "True"
-        dolphin_config["Movie"]["DumpFramesSilent"] = "True"
-
-        # Configure DSP for audio dumping
-        if "DSP" not in dolphin_config:
-            dolphin_config["DSP"] = {}
-        dolphin_config["DSP"]["DumpAudio"] = "True"
-        dolphin_config["DSP"]["DumpAudioSilent"] = "True"
-
-        # Enable cheats for Gecko codes (music muting)
+        # Set up Gecko code for music muting (this writes to GameSettings/, not Config/)
         if self.config.mute_music:
-            if "Core" not in dolphin_config:
-                dolphin_config["Core"] = {}
-            dolphin_config["Core"]["EnableCheats"] = "True"
             self.setup_music_mute()
-
-        with open(dolphin_ini_path, "w") as f:
-            dolphin_config.write(f)
 
     def start_capture(
         self,
@@ -485,8 +448,7 @@ $Netplay Safe Kill Music
         cmd = build_dolphin_command(
             config=self.config,
             playback_config_path=playback_config_path,
-            output_dir=output_dir,
-            batch_mode=not persistent,
+            batch_mode=False,  # NEVER use batch mode - it disables frame dumping!
         )
 
         # Use provided window ID or capture current for focus restoration
@@ -495,7 +457,13 @@ $Netplay Safe Kill Music
         # Start background thread to minimize windows as they appear
         self._start_window_minimizer()
 
-        self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+        # Don't capture stdout - it can fill the pipe buffer and block Dolphin
+        # The --cout output goes to stderr anyway
+        self._process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
         # IMMEDIATELY minimize first window with --sync (waits for window to exist)
         # This catches the first window before the polling loop can miss it
@@ -509,7 +477,7 @@ $Netplay Safe Kill Music
         frame_dir: Path | None = None,
         check_interval: float = 1.0,
         stable_threshold: float = 3.0,
-        timeout: float | None = None,
+        timeout: float = 120.0,
         terminate: bool = True,
     ) -> int:
         """Wait for Dolphin to finish capturing.
@@ -521,7 +489,8 @@ $Netplay Safe Kill Music
             frame_dir: Directory where frame dump files are written
             check_interval: Seconds between file size checks
             stable_threshold: Seconds file must be stable before terminating
-            timeout: Maximum seconds to wait (None = no limit)
+            timeout: Maximum seconds to wait (default 120s). Without batch mode,
+                Dolphin doesn't exit automatically, so this timeout prevents hangs.
             terminate: If True (default), terminate Dolphin after capture.
                 Set False for persistent sessions where you'll call reload_replay().
 
@@ -539,7 +508,7 @@ $Netplay Safe Kill Music
 
         while self._process.poll() is None:
             # Check for timeout
-            if timeout is not None and elapsed >= timeout:
+            if elapsed >= timeout:
                 break
 
             # Check file size if we have a frame_dir

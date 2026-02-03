@@ -49,49 +49,59 @@ class CapturePipeline:
         # even during batch captures where multiple moments are processed
         active_window = self._dolphin.get_active_window()
 
-        # Create temp directory for frames
-        with tempfile.TemporaryDirectory() as temp_dir:
-            frame_dir = Path(temp_dir) / "frames"
-            frame_dir.mkdir()
+        # Frame dumps go to Dolphin's user_dir/Dump/ directory
+        # (not a temp directory - GFX.ini DumpPath is not set)
+        if self.dolphin_config.user_dir is None:
+            raise ValueError("user_dir must be set for capture")
 
-            # Start Dolphin capture for the specific frame range
-            self._dolphin.start_capture(
-                replay_path=moment.replay_path,
-                output_dir=frame_dir,
-                start_frame=moment.frame_start,
-                end_frame=moment.frame_end,
-                restore_window=active_window,
-            )
+        dump_dir = self.dolphin_config.user_dir / "Dump"
 
-            # Wait for capture to complete (monitors frame dump file)
-            return_code = self._dolphin.wait_for_completion(frame_dir=frame_dir)
-            if return_code != 0:
-                return None
+        # Clear any previous frame dumps before starting
+        video_file = dump_dir / "Frames" / "framedump0.avi"
+        audio_file = dump_dir / "Audio" / "dspdump.wav"
+        if video_file.exists():
+            video_file.unlink()
+        # Note: Don't delete audio files (dtkdump.wav) - they have different names
 
-            # Find Dolphin's output files (in subdirectories created by Dolphin)
-            video_file = frame_dir / "Frames" / "framedump0.avi"
-            audio_file = frame_dir / "Audio" / "dspdump.wav"
+        # Start Dolphin capture for the specific frame range
+        self._dolphin.start_capture(
+            replay_path=moment.replay_path,
+            output_dir=dump_dir,  # Used for setting up directories
+            start_frame=moment.frame_start,
+            end_frame=moment.frame_end,
+            restore_window=active_window,
+        )
 
-            # Return None if frame dump wasn't created
-            if not video_file.exists():
-                print(f"Warning: Frame dump not created for {moment.replay_path}")
-                return None
+        # Wait for capture to complete (monitors frame dump file)
+        return_code = self._dolphin.wait_for_completion(frame_dir=dump_dir)
+        if return_code != 0:
+            return None
 
-            # Generate output filename
-            filename = generate_clip_filename(moment, index)
-            output_path = self.output_dir / filename
+        # Return None if frame dump wasn't created
+        if not video_file.exists():
+            print(f"Warning: Frame dump not created for {moment.replay_path}")
+            return None
 
-            # Encode AVI+WAV to MP4
-            self._ffmpeg.encode_avi(
-                video_file=video_file,
-                output_file=output_path,
-                audio_file=audio_file if audio_file.exists() else None,
-            )
+        # Check for audio dump file (can be dspdump.wav or dtkdump.wav)
+        audio_file = dump_dir / "Audio" / "dspdump.wav"
+        if not audio_file.exists():
+            audio_file = dump_dir / "Audio" / "dtkdump.wav"
 
-            # Write sidecar metadata file
-            write_sidecar_file(output_path, moment)
+        # Generate output filename
+        filename = generate_clip_filename(moment, index)
+        output_path = self.output_dir / filename
 
-            return output_path
+        # Encode AVI+WAV to MP4
+        self._ffmpeg.encode_avi(
+            video_file=video_file,
+            output_file=output_path,
+            audio_file=audio_file if audio_file.exists() else None,
+        )
+
+        # Write sidecar metadata file
+        write_sidecar_file(output_path, moment)
+
+        return output_path
 
     def capture_moments(
         self,
@@ -111,6 +121,10 @@ class CapturePipeline:
         if not moments:
             return []
 
+        if self.dolphin_config.user_dir is None:
+            raise ValueError("user_dir must be set for capture")
+
+        dump_dir = self.dolphin_config.user_dir / "Dump"
         results: list[Path] = []
         pending_encodes: list[tuple[Future[None], Path, TaggedMoment, str]] = []
 
@@ -118,35 +132,47 @@ class CapturePipeline:
             # Capture active window RIGHT BEFORE each Dolphin launch
             active_window = self._dolphin.get_active_window()
 
-            # Create temp directory for frames (manual cleanup after async encode)
-            temp_dir = tempfile.mkdtemp()
-            frame_dir = Path(temp_dir) / "frames"
-            frame_dir.mkdir()
+            # Clear previous frame dump before starting new capture
+            dump_video = dump_dir / "Frames" / "framedump0.avi"
+            if dump_video.exists():
+                dump_video.unlink()
 
             # Start Dolphin capture (batch mode - exits after replay)
             self._dolphin.start_capture(
                 replay_path=moment.replay_path,
-                output_dir=frame_dir,
+                output_dir=dump_dir,  # Used for setting up directories
                 start_frame=moment.frame_start,
                 end_frame=moment.frame_end,
                 restore_window=active_window,
             )
 
             # Wait for capture to complete
-            return_code = self._dolphin.wait_for_completion(frame_dir=frame_dir)
+            return_code = self._dolphin.wait_for_completion(frame_dir=dump_dir)
             if return_code != 0:
-                shutil.rmtree(temp_dir, ignore_errors=True)
                 continue
 
-            # Find Dolphin's output files
-            video_file = frame_dir / "Frames" / "framedump0.avi"
-            audio_file = frame_dir / "Audio" / "dspdump.wav"
+            # Find Dolphin's output files in user_dir/Dump/
+            video_file = dump_dir / "Frames" / "framedump0.avi"
 
             # Skip if frame dump wasn't created (Dolphin may not have dumped frames)
             if not video_file.exists():
                 print(f"Warning: Frame dump not created for {moment.replay_path}")
-                shutil.rmtree(temp_dir, ignore_errors=True)
                 continue
+
+            # Check for audio dump file (can be dspdump.wav or dtkdump.wav)
+            audio_file = dump_dir / "Audio" / "dspdump.wav"
+            if not audio_file.exists():
+                audio_file = dump_dir / "Audio" / "dtkdump.wav"
+
+            # Copy files to temp dir for background encoding (so they don't get overwritten)
+            temp_dir = tempfile.mkdtemp()
+            temp_video = Path(temp_dir) / "framedump0.avi"
+            temp_audio = Path(temp_dir) / "audio.wav"
+            shutil.copy2(video_file, temp_video)
+            if audio_file.exists():
+                shutil.copy2(audio_file, temp_audio)
+            else:
+                temp_audio = None  # type: ignore[assignment]
 
             # Generate output filename
             filename = generate_clip_filename(moment, i)
@@ -154,9 +180,9 @@ class CapturePipeline:
 
             # Start encoding in background (runs while next clip captures)
             future = self._ffmpeg.encode_avi_async(
-                video_file=video_file,
+                video_file=temp_video,
                 output_file=output_path,
-                audio_file=audio_file if audio_file.exists() else None,
+                audio_file=temp_audio,
             )
             pending_encodes.append((future, output_path, moment, temp_dir))
 
