@@ -1,7 +1,10 @@
 """Tests for ffmpeg wrapper."""
 
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.capture.ffmpeg import FFmpegEncoder, build_encode_command
 
@@ -125,3 +128,47 @@ def test_ffmpeg_encoder_encode_avi(tmp_path: Path) -> None:
         assert "ffmpeg" in call_args[0]
         assert str(video_file) in call_args
         assert str(audio_file) in call_args
+
+
+def test_encode_avi_async_returns_future(tmp_path: Path) -> None:
+    """encode_avi_async returns a Future that completes when encoding finishes."""
+    encoder = FFmpegEncoder()
+
+    video_file = tmp_path / "framedump0.avi"
+    audio_file = tmp_path / "dspdump.wav"
+    output_file = tmp_path / "output.mp4"
+    video_file.write_bytes(b"dummy video")
+    audio_file.write_bytes(b"dummy audio")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+
+        future = encoder.encode_avi_async(
+            video_file=video_file,
+            output_file=output_file,
+            audio_file=audio_file,
+        )
+
+        assert isinstance(future, Future)
+        future.result(timeout=5)
+        mock_run.assert_called_once()
+
+
+def test_encode_avi_async_raises_on_failure(tmp_path: Path) -> None:
+    """encode_avi_async Future raises RuntimeError if ffmpeg fails."""
+    encoder = FFmpegEncoder()
+
+    video_file = tmp_path / "framedump0.avi"
+    output_file = tmp_path / "output.mp4"
+    video_file.write_bytes(b"dummy video")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stderr="encode error")
+
+        future = encoder.encode_avi_async(
+            video_file=video_file,
+            output_file=output_file,
+        )
+
+        with pytest.raises(RuntimeError, match="ffmpeg failed"):
+            future.result(timeout=5)

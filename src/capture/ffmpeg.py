@@ -1,6 +1,7 @@
 """FFmpeg wrapper for encoding video clips."""
 
 import subprocess
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -156,3 +157,44 @@ class FFmpegEncoder:
 
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg failed: {result.stderr}")
+
+    _executor: ThreadPoolExecutor | None = None
+
+    def _get_executor(self) -> ThreadPoolExecutor:
+        """Get or create the thread pool executor for async encoding."""
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=2)
+        return self._executor
+
+    def encode_avi_async(
+        self,
+        video_file: Path,
+        output_file: Path,
+        audio_file: Path | None = None,
+        crf: int = 18,
+        preset: str = "medium",
+    ) -> "Future[None]":
+        """Encode AVI video to MP4 asynchronously.
+
+        Returns immediately with a Future that completes when encoding finishes.
+
+        Args:
+            video_file: Path to AVI video file from Dolphin frame dump
+            output_file: Output MP4 path
+            audio_file: Optional WAV audio file from Dolphin audio dump
+            crf: Quality setting (lower = better, 18 is visually lossless)
+            preset: Encoding speed preset
+
+        Returns:
+            Future that completes when encoding finishes
+        """
+        def _encode() -> None:
+            self.encode_avi(
+                video_file=video_file,
+                output_file=output_file,
+                audio_file=audio_file,
+                crf=crf,
+                preset=preset,
+            )
+
+        return self._get_executor().submit(_encode)
