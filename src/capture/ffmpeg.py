@@ -9,8 +9,6 @@ def build_avi_encode_command(
     video_file: Path,
     audio_file: Path | None,
     output_file: Path,
-    crf: int = 18,
-    preset: str = "medium",
 ) -> list[str]:
     """Build ffmpeg command for encoding AVI+WAV to MP4.
 
@@ -18,8 +16,6 @@ def build_avi_encode_command(
         video_file: Path to input AVI video file (from Dolphin frame dump)
         audio_file: Optional path to WAV audio file (from Dolphin audio dump)
         output_file: Path for output MP4 video
-        crf: Constant Rate Factor for quality (lower = better, 18 is visually lossless)
-        preset: Encoding speed preset
 
     Returns:
         Command as list of strings
@@ -60,8 +56,6 @@ class FFmpegEncoder:
         video_file: Path,
         output_file: Path,
         audio_file: Path | None = None,
-        crf: int = 18,
-        preset: str = "medium",
     ) -> None:
         """Encode AVI video (with optional WAV audio) to MP4.
 
@@ -69,15 +63,11 @@ class FFmpegEncoder:
             video_file: Path to AVI video file from Dolphin frame dump
             output_file: Output MP4 path
             audio_file: Optional WAV audio file from Dolphin audio dump
-            crf: Quality setting (lower = better, 18 is visually lossless)
-            preset: Encoding speed preset
         """
         cmd = build_avi_encode_command(
             video_file=video_file,
             audio_file=audio_file,
             output_file=output_file,
-            crf=crf,
-            preset=preset,
         )
 
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -98,8 +88,6 @@ class FFmpegEncoder:
         video_file: Path,
         output_file: Path,
         audio_file: Path | None = None,
-        crf: int = 18,
-        preset: str = "medium",
     ) -> "Future[None]":
         """Encode AVI video to MP4 asynchronously.
 
@@ -109,8 +97,6 @@ class FFmpegEncoder:
             video_file: Path to AVI video file from Dolphin frame dump
             output_file: Output MP4 path
             audio_file: Optional WAV audio file from Dolphin audio dump
-            crf: Quality setting (lower = better, 18 is visually lossless)
-            preset: Encoding speed preset
 
         Returns:
             Future that completes when encoding finishes
@@ -120,8 +106,6 @@ class FFmpegEncoder:
                 video_file=video_file,
                 output_file=output_file,
                 audio_file=audio_file,
-                crf=crf,
-                preset=preset,
             )
 
         return self._get_executor().submit(_encode)
