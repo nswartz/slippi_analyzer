@@ -22,11 +22,6 @@ def get_xdg_data_home() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
 
 
-def get_xdg_cache_home() -> Path:
-    """Get XDG_CACHE_HOME (~/.cache by default)."""
-    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-
-
 @dataclass
 class Config:
     """Application configuration."""
