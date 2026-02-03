@@ -166,6 +166,46 @@ def test_wait_for_completion_monitors_file_size(tmp_path: Path) -> None:
     assert result == 0
 
 
+def test_reload_replay_updates_playback_config_with_command_id(tmp_path: Path) -> None:
+    """reload_replay should update playback.txt with new commandId."""
+    import json
+
+    user_dir = tmp_path / "dolphin"
+    slippi_dir = user_dir / "Slippi"
+    slippi_dir.mkdir(parents=True)
+
+    config = DolphinConfig(
+        executable=Path("/usr/bin/echo"),
+        user_dir=user_dir,
+        iso_path=Path("/tmp/test.iso"),
+    )
+    controller = DolphinController(config)
+
+    # Mock that Dolphin is running
+    controller._process = MagicMock()  # pyright: ignore[reportPrivateUsage]
+    controller._process.poll.return_value = None  # Still running
+
+    # Reload with new replay
+    controller.reload_replay(
+        replay_path=Path("/tmp/new_replay.slp"),
+        start_frame=100,
+        end_frame=200,
+    )
+
+    # Verify playback.txt was updated
+    playback_config = slippi_dir / "playback.txt"
+    assert playback_config.exists()
+
+    with open(playback_config) as f:
+        config_data = json.load(f)
+
+    assert config_data["replay"] == str(Path("/tmp/new_replay.slp").absolute())
+    assert config_data["startFrame"] == 100
+    assert config_data["endFrame"] == 200
+    assert "commandId" in config_data
+    assert config_data["commandId"]  # Should not be empty
+
+
 def test_start_capture_calls_minimize_with_sync_after_launch() -> None:
     """First Dolphin window should be minimized with --sync after Popen."""
     config = DolphinConfig(

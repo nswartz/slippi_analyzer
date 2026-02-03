@@ -5,6 +5,7 @@ import json
 import subprocess
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ def create_playback_config(
     output_path: Path,
     start_frame: int | None = None,
     end_frame: int | None = None,
+    command_id: str | None = None,
 ) -> None:
     """Create a Slippi playback configuration file.
 
@@ -70,6 +72,7 @@ def create_playback_config(
         output_path: Path to write the playback.txt config
         start_frame: Optional start frame for playback
         end_frame: Optional end frame for playback
+        command_id: Optional command ID for triggering reload
     """
     config: dict[str, Any] = {
         "mode": "normal",
@@ -82,6 +85,8 @@ def create_playback_config(
         config["startFrame"] = start_frame
     if end_frame is not None:
         config["endFrame"] = end_frame
+    if command_id is not None:
+        config["commandId"] = command_id
 
     with open(output_path, "w") as f:
         json.dump(config, f, indent=2)
@@ -501,3 +506,43 @@ $Netplay Safe Kill Music
             self._process.terminate()
             self._process.wait(timeout=10)
             self._process = None
+
+    def reload_replay(
+        self,
+        replay_path: Path,
+        start_frame: int | None = None,
+        end_frame: int | None = None,
+    ) -> None:
+        """Reload a new replay into running Dolphin via commandId.
+
+        Dolphin must already be running (started via start_capture).
+        Updates playback.txt with new replay and a fresh commandId,
+        which triggers Dolphin to reload without restarting.
+
+        Args:
+            replay_path: Path to new replay file
+            start_frame: Optional start frame
+            end_frame: Optional end frame
+
+        Raises:
+            RuntimeError: If Dolphin is not running
+            ValueError: If user_dir is not configured
+        """
+        if self._process is None or self._process.poll() is not None:
+            raise RuntimeError("Dolphin is not running. Call start_capture first.")
+
+        if self.config.user_dir is None:
+            raise ValueError("user_dir must be set for playback config")
+
+        playback_config_path = self.config.user_dir / "Slippi" / "playback.txt"
+
+        # Generate unique commandId to trigger reload
+        command_id = f"cmd-{uuid.uuid4().hex[:8]}"
+
+        create_playback_config(
+            replay_path=replay_path,
+            output_path=playback_config_path,
+            start_frame=start_frame,
+            end_frame=end_frame,
+            command_id=command_id,
+        )
