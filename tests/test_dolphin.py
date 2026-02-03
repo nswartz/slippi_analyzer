@@ -131,9 +131,12 @@ def test_wait_for_completion_monitors_file_size(tmp_path: Path) -> None:
     controller = DolphinController(config)
 
     # Create frame dump file that simulates a completed dump
+    # Dolphin creates Frames/ subdirectory under the dump path
     frame_dir = tmp_path / "frames"
     frame_dir.mkdir()
-    video_file = frame_dir / "framedump0.avi"
+    frames_subdir = frame_dir / "Frames"
+    frames_subdir.mkdir()
+    video_file = frames_subdir / "framedump0.avi"
     video_file.write_bytes(b"x" * 1000)
 
     # Mock the process
@@ -260,3 +263,41 @@ def test_start_capture_calls_minimize_with_sync_after_launch() -> None:
         f"xdotool search --sync (index {sync_search_index}) must be called after "
         f"Popen (index {popen_index}). Call order: {call_order}"
     )
+
+
+def test_minimize_dolphin_window_moves_to_least_active_monitor(tmp_path: Path) -> None:
+    """Dolphin window is moved to least-active monitor before minimizing."""
+    from src.capture.monitors import Monitor
+
+    config = DolphinConfig(executable=Path("/usr/bin/dolphin-emu"), user_dir=tmp_path)
+    controller = DolphinController(config)
+
+    monitors = [
+        Monitor("DP-1", 0, 0, 1920, 1080, True),
+        Monitor("HDMI-1", 1920, 0, 1920, 1080, False),
+    ]
+
+    run_calls: list[list[str]] = []
+
+    def mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+        run_calls.append(cmd)
+        result = MagicMock()
+        result.returncode = 0
+        # Return window ID for xdotool search
+        if "search" in cmd:
+            result.stdout = "12345\n"
+        return result
+
+    with patch("src.capture.dolphin.get_monitors", return_value=monitors):
+        with patch("src.capture.dolphin.get_least_active_monitor") as mock_least:
+            mock_least.return_value = monitors[1]  # HDMI-1
+            with patch("subprocess.run", side_effect=mock_run):
+                # pyright: ignore[reportPrivateUsage]
+                controller._minimize_dolphin_window()
+
+    # Verify windowmove was called with HDMI-1 coordinates (x=1920)
+    move_calls = [c for c in run_calls if "windowmove" in c]
+    assert len(move_calls) > 0, f"Should have windowmove call. Calls: {run_calls}"
+    # Should move to x=1920 (HDMI-1's x position)
+    move_call = move_calls[0]
+    assert "1920" in move_call, f"Should move to x=1920. Call: {move_call}"

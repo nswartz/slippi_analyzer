@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.capture.monitors import get_least_active_monitor, get_monitors
+
 
 @dataclass
 class DolphinConfig:
@@ -27,6 +29,7 @@ def build_dolphin_command(
     config: DolphinConfig,
     playback_config_path: Path,
     output_dir: Path,
+    batch_mode: bool = True,
 ) -> list[str]:
     """Build command to launch Slippi Playback for frame dumping.
 
@@ -34,6 +37,8 @@ def build_dolphin_command(
         config: Dolphin configuration
         playback_config_path: Path to playback.txt config file
         output_dir: Directory for frame dump output
+        batch_mode: If True, Dolphin exits after replay ends. Set False for
+            persistent sessions where replays are reloaded via commandId.
 
     Returns:
         Command as list of strings
@@ -49,11 +54,15 @@ def build_dolphin_command(
     # Slippi Playback specific arguments
     cmd.extend([
         "-i", str(playback_config_path),  # Playback config file
-        "-b",  # Batch mode - exit when done
         "--output-directory", str(output_dir),
         "--hide-seekbar",  # Hide seekbar during playback
         "--cout",  # Enable console output for frame tracking
     ])
+
+    # Batch mode causes Dolphin to exit after replay ends
+    # Disable for persistent sessions where we reload replays via commandId
+    if batch_mode:
+        cmd.append("-b")
 
     return cmd
 
@@ -105,6 +114,7 @@ class DolphinController:
         self._minimize_thread: threading.Thread | None = None
         self._stop_minimize_thread = threading.Event()
         self._minimized_windows: set[str] = set()
+        self._output_dir: Path | None = None  # Set by start_capture for persistent sessions
 
     def get_active_window(self) -> str | None:
         """Get the currently active window ID using xdotool."""
@@ -120,6 +130,27 @@ class DolphinController:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
         return None
+
+    def _kill_existing_dolphin(self) -> None:
+        """Kill any existing Dolphin processes before starting a new capture.
+
+        This prevents issues where a lingering Dolphin window from a previous
+        run interferes with launching a new instance.
+        """
+        try:
+            # Use pkill to terminate any dolphin processes
+            # Try multiple patterns since the AppImage may have different process names
+            for pattern in ["dolphin", "Slippi"]:
+                subprocess.run(
+                    ["pkill", "-f", pattern],
+                    capture_output=True,
+                    timeout=5,
+                )
+            # Give processes time to terminate
+            import time
+            time.sleep(0.5)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
 
     def _find_dolphin_windows(self) -> list[str]:
         """Find Dolphin window IDs by searching multiple patterns."""
@@ -195,12 +226,17 @@ class DolphinController:
             self._minimize_thread = None
 
     def _minimize_dolphin_window(self) -> None:
-        """Find and minimize Dolphin window immediately, restore focus.
+        """Find and minimize Dolphin window on least-active monitor.
 
         Uses xdotool --sync to wait for window to appear rather than fixed sleep,
-        which minimizes the window as soon as it's created.
+        which minimizes the window as soon as it's created. On multi-monitor
+        setups, moves the window to the least-active monitor first.
         """
         try:
+            # Get monitors and find least active
+            monitors = get_monitors()
+            target_monitor = get_least_active_monitor(monitors) if monitors else None
+
             # Use --sync to wait for window to appear (up to 10 seconds)
             # This minimizes as soon as the window exists, reducing visibility
             result = subprocess.run(
@@ -214,6 +250,19 @@ class DolphinController:
                 window_ids = result.stdout.strip().split("\n")
                 for window_id in window_ids:
                     if window_id:
+                        # Move to least-active monitor if we have multi-monitor
+                        if target_monitor and len(monitors) > 1:
+                            subprocess.run(
+                                [
+                                    "xdotool",
+                                    "windowmove",
+                                    window_id,
+                                    str(target_monitor.x),
+                                    str(target_monitor.y),
+                                ],
+                                timeout=5,
+                            )
+
                         # Minimize immediately
                         subprocess.run(
                             ["xdotool", "windowminimize", "--sync", window_id],
@@ -343,6 +392,13 @@ $Netplay Safe Kill Music
 
         # Enable video frame dumping at internal resolution (for quality)
         gfx_config["Settings"]["InternalResolutionFrameDumps"] = "True"
+        # Set output directory for frame dumps (--output-directory flag is unreliable)
+        gfx_config["Settings"]["DumpPath"] = str(output_dir)
+
+        # Create the output directories that Dolphin expects
+        # Dolphin creates Frames/ and Audio/ subdirectories under DumpPath
+        (output_dir / "Frames").mkdir(parents=True, exist_ok=True)
+        (output_dir / "Audio").mkdir(parents=True, exist_ok=True)
 
         # Write config
         with open(gfx_ini_path, "w") as f:
@@ -385,6 +441,7 @@ $Netplay Safe Kill Music
         start_frame: int | None = None,
         end_frame: int | None = None,
         restore_window: str | None = None,
+        persistent: bool = False,
     ) -> None:
         """Start Dolphin for frame capture.
 
@@ -394,8 +451,16 @@ $Netplay Safe Kill Music
             start_frame: Optional start frame for capture
             end_frame: Optional end frame for capture
             restore_window: Window ID to restore focus to after capture
+            persistent: If True, Dolphin stays running after replay ends for
+                reload_replay() calls. Set False (default) for single captures.
         """
+        # Kill any lingering Dolphin processes before starting
+        self._kill_existing_dolphin()
+
         self.setup_frame_dump(output_dir)
+
+        # Store output directory for persistent sessions
+        self._output_dir = output_dir
 
         # Create playback config file
         if self.config.user_dir is None:
@@ -404,17 +469,22 @@ $Netplay Safe Kill Music
         playback_config_path = self.config.user_dir / "Slippi" / "playback.txt"
         playback_config_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Generate commandId for persistent sessions (needed for reload)
+        command_id = f"cmd-{uuid.uuid4().hex[:8]}" if persistent else None
+
         create_playback_config(
             replay_path=replay_path,
             output_path=playback_config_path,
             start_frame=start_frame,
             end_frame=end_frame,
+            command_id=command_id,
         )
 
         cmd = build_dolphin_command(
             config=self.config,
             playback_config_path=playback_config_path,
             output_dir=output_dir,
+            batch_mode=not persistent,
         )
 
         # Use provided window ID or capture current for focus restoration
@@ -438,6 +508,7 @@ $Netplay Safe Kill Music
         check_interval: float = 1.0,
         stable_threshold: float = 3.0,
         timeout: float | None = None,
+        terminate: bool = True,
     ) -> int:
         """Wait for Dolphin to finish capturing.
 
@@ -449,14 +520,17 @@ $Netplay Safe Kill Music
             check_interval: Seconds between file size checks
             stable_threshold: Seconds file must be stable before terminating
             timeout: Maximum seconds to wait (None = no limit)
+            terminate: If True (default), terminate Dolphin after capture.
+                Set False for persistent sessions where you'll call reload_replay().
 
         Returns:
-            Return code from Dolphin process (0 on success)
+            Return code from Dolphin process (0 on success, always 0 if not terminating)
         """
         if self._process is None:
             raise RuntimeError("No capture in progress")
 
-        video_file = frame_dir / "framedump0.avi" if frame_dir else None
+        # Dolphin creates subdirectories under DumpPath: Frames/ for video, Audio/ for audio
+        video_file = frame_dir / "Frames" / "framedump0.avi" if frame_dir else None
         last_size = -1
         stable_time = 0.0
         elapsed = 0.0
@@ -484,20 +558,24 @@ $Netplay Safe Kill Music
         # Give Dolphin time to finish writing files
         time.sleep(2)
 
-        # Stop the window minimizer thread
-        self._stop_window_minimizer()
+        if terminate:
+            # Stop the window minimizer thread
+            self._stop_window_minimizer()
 
-        # Terminate Dolphin
-        self._process.terminate()
-        try:
-            self._process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self._process.kill()
-            self._process.wait()
+            # Terminate Dolphin
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
 
-        return_code = self._process.returncode
-        self._process = None
-        return return_code if return_code is not None else 0
+            return_code = self._process.returncode
+            self._process = None
+            return return_code if return_code is not None else 0
+
+        # Not terminating - return success
+        return 0
 
     def stop(self) -> None:
         """Stop Dolphin capture."""
@@ -507,6 +585,34 @@ $Netplay Safe Kill Music
             self._process.wait(timeout=10)
             self._process = None
 
+    def copy_output_files(self, dest_dir: Path) -> None:
+        """Copy output files from shared directory to destination.
+
+        Used in persistent sessions to collect each clip's output files
+        after capture completes, before reloading the next replay.
+
+        Args:
+            dest_dir: Destination directory for the output files
+
+        Raises:
+            RuntimeError: If no output directory has been set (start_capture not called)
+        """
+        if self._output_dir is None:
+            raise RuntimeError("No output directory set. Call start_capture first.")
+
+        import shutil
+        # Dolphin creates subdirectories: Frames/ for video, Audio/ for audio
+        video_file = self._output_dir / "Frames" / "framedump0.avi"
+        audio_file = self._output_dir / "Audio" / "dspdump.wav"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        if video_file.exists():
+            shutil.copy2(video_file, dest_dir / "framedump0.avi")
+            video_file.unlink()  # Clear for next clip
+        if audio_file.exists():
+            shutil.copy2(audio_file, dest_dir / "dspdump.wav")
+            audio_file.unlink()  # Clear for next clip
+
     def reload_replay(
         self,
         replay_path: Path,
@@ -515,9 +621,12 @@ $Netplay Safe Kill Music
     ) -> None:
         """Reload a new replay into running Dolphin via commandId.
 
-        Dolphin must already be running (started via start_capture).
+        Dolphin must already be running (started via start_capture with persistent=True).
         Updates playback.txt with new replay and a fresh commandId,
         which triggers Dolphin to reload without restarting.
+
+        Note: Call copy_output_files() before this method to save the previous
+        clip's output files before they get overwritten.
 
         Args:
             replay_path: Path to new replay file
