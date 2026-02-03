@@ -1,5 +1,6 @@
 """Tests for capture pipeline."""
 
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -220,3 +221,65 @@ def test_capture_moments_launches_fresh_dolphin_per_clip(tmp_path: Path) -> None
 
     # Should launch fresh Dolphin for each clip (batch mode required for frame dumping)
     assert start_capture_calls == 3, f"Expected 3 start_capture calls, got {start_capture_calls}"
+
+
+def test_capture_moments_uses_async_encoding(tmp_path: Path) -> None:
+    """capture_moments uses encode_avi_async for background encoding."""
+    from src.capture.dolphin import DolphinController, DolphinConfig
+    from src.capture.ffmpeg import FFmpegEncoder
+
+    encode_async_calls = 0
+    encode_sync_calls = 0
+
+    def mock_start_capture(self: DolphinController, **kwargs: object) -> None:
+        output_dir = kwargs.get("output_dir")
+        if output_dir is not None:
+            self._output_dir = output_dir if isinstance(output_dir, Path) else Path(str(output_dir))
+            frames_dir = self._output_dir / "Frames"
+            audio_dir = self._output_dir / "Audio"
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            (frames_dir / "framedump0.avi").touch()
+            (audio_dir / "dspdump.wav").touch()
+
+    def mock_encode_avi_async(self: FFmpegEncoder, **kwargs: object) -> "Future[None]":
+        nonlocal encode_async_calls
+        encode_async_calls += 1
+        future: Future[None] = Future()
+        future.set_result(None)
+        return future
+
+    def mock_encode_avi(self: FFmpegEncoder, **kwargs: object) -> None:
+        nonlocal encode_sync_calls
+        encode_sync_calls += 1
+
+    with patch.object(DolphinController, "start_capture", mock_start_capture):
+        with patch.object(DolphinController, "wait_for_completion", return_value=0):
+            with patch.object(DolphinController, "get_active_window", return_value="12345"):
+                with patch.object(FFmpegEncoder, "encode_avi_async", mock_encode_avi_async):
+                    with patch.object(FFmpegEncoder, "encode_avi", mock_encode_avi):
+                        with patch("src.capture.pipeline.write_sidecar_file"):
+                            pipeline = CapturePipeline(
+                                output_dir=tmp_path / "clips",
+                                dolphin_config=DolphinConfig(),
+                            )
+
+                            moments = [
+                                TaggedMoment(
+                                    replay_path=Path(f"/tmp/test{i}.slp"),
+                                    frame_start=i * 100,
+                                    frame_end=i * 100 + 50,
+                                    tags=["test"],
+                                    metadata={"date": "2025-01-01", "stage": "bf", "player": "fox"},
+                                )
+                                for i in range(3)
+                            ]
+
+                            results = pipeline.capture_moments(moments)
+
+    # Should use async encoding for all 3 clips
+    assert encode_async_calls == 3, f"Expected 3 encode_avi_async calls, got {encode_async_calls}"
+    # Should NOT use sync encoding
+    assert encode_sync_calls == 0, f"Expected 0 encode_avi calls, got {encode_sync_calls}"
+    # Should return 3 results
+    assert len(results) == 3

@@ -2,6 +2,7 @@
 
 import shutil
 import tempfile
+from concurrent.futures import Future
 from pathlib import Path
 
 from src.capture.dolphin import DolphinConfig, DolphinController
@@ -93,7 +94,8 @@ class CapturePipeline:
     ) -> list[Path]:
         """Capture multiple moments as video clips.
 
-        Launches a fresh Dolphin instance per clip (batch mode required for frame dumping).
+        Launches a fresh Dolphin instance per clip. Encodes in background while
+        next clip captures, reducing total batch time.
 
         Args:
             moments: List of moments to capture
@@ -105,48 +107,57 @@ class CapturePipeline:
             return []
 
         results: list[Path] = []
+        pending_encodes: list[tuple[Future[None], Path, TaggedMoment, str]] = []
 
         for i, moment in enumerate(moments, start=1):
             # Capture active window RIGHT BEFORE each Dolphin launch
             active_window = self._dolphin.get_active_window()
 
-            # Create temp directory for frames
-            with tempfile.TemporaryDirectory() as temp_dir:
-                frame_dir = Path(temp_dir) / "frames"
-                frame_dir.mkdir()
+            # Create temp directory for frames (manual cleanup after async encode)
+            temp_dir = tempfile.mkdtemp()
+            frame_dir = Path(temp_dir) / "frames"
+            frame_dir.mkdir()
 
-                # Start Dolphin capture (batch mode - exits after replay)
-                self._dolphin.start_capture(
-                    replay_path=moment.replay_path,
-                    output_dir=frame_dir,
-                    start_frame=moment.frame_start,
-                    end_frame=moment.frame_end,
-                    restore_window=active_window,
-                )
+            # Start Dolphin capture (batch mode - exits after replay)
+            self._dolphin.start_capture(
+                replay_path=moment.replay_path,
+                output_dir=frame_dir,
+                start_frame=moment.frame_start,
+                end_frame=moment.frame_end,
+                restore_window=active_window,
+            )
 
-                # Wait for capture to complete
-                return_code = self._dolphin.wait_for_completion(frame_dir=frame_dir)
-                if return_code != 0:
-                    continue
+            # Wait for capture to complete
+            return_code = self._dolphin.wait_for_completion(frame_dir=frame_dir)
+            if return_code != 0:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                continue
 
-                # Find Dolphin's output files
-                video_file = frame_dir / "Frames" / "framedump0.avi"
-                audio_file = frame_dir / "Audio" / "dspdump.wav"
+            # Find Dolphin's output files
+            video_file = frame_dir / "Frames" / "framedump0.avi"
+            audio_file = frame_dir / "Audio" / "dspdump.wav"
 
-                # Generate output filename
-                filename = generate_clip_filename(moment, i)
-                output_path = self.output_dir / filename
+            # Generate output filename
+            filename = generate_clip_filename(moment, i)
+            output_path = self.output_dir / filename
 
-                # Encode AVI+WAV to MP4
-                self._ffmpeg.encode_avi(
-                    video_file=video_file,
-                    output_file=output_path,
-                    audio_file=audio_file if audio_file.exists() else None,
-                )
+            # Start encoding in background (runs while next clip captures)
+            future = self._ffmpeg.encode_avi_async(
+                video_file=video_file,
+                output_file=output_path,
+                audio_file=audio_file if audio_file.exists() else None,
+            )
+            pending_encodes.append((future, output_path, moment, temp_dir))
 
-                # Write sidecar metadata file
+        # Wait for all encodes to complete
+        for future, output_path, moment, temp_dir in pending_encodes:
+            try:
+                future.result(timeout=300)
                 write_sidecar_file(output_path, moment)
-
                 results.append(output_path)
+            except Exception as e:
+                print(f"Encoding failed for {output_path}: {e}")
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
         return results
