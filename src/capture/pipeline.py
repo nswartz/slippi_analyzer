@@ -38,6 +38,11 @@ class CapturePipeline:
         Returns:
             Path to the generated video clip, or None if capture failed
         """
+        # Capture active window RIGHT BEFORE starting Dolphin
+        # This ensures we return focus to whatever user was working in,
+        # even during batch captures where multiple moments are processed
+        active_window = self._dolphin.get_active_window()
+
         # Create temp directory for frames
         with tempfile.TemporaryDirectory() as temp_dir:
             frame_dir = Path(temp_dir) / "frames"
@@ -49,6 +54,7 @@ class CapturePipeline:
                 output_dir=frame_dir,
                 start_frame=moment.frame_start,
                 end_frame=moment.frame_end,
+                restore_window=active_window,
             )
 
             # Wait for capture to complete (monitors frame dump file)

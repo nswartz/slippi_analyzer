@@ -107,3 +107,64 @@ def test_pipeline_handles_dolphin_failure(tmp_path: Path) -> None:
         assert result is None
         # FFmpeg should not be called if Dolphin fails
         mock_ffmpeg_instance.encode_avi.assert_not_called()
+
+
+def test_capture_moment_gets_active_window_before_start_capture(tmp_path: Path) -> None:
+    """Active window should be captured right before Dolphin starts.
+
+    This ensures focus restoration works correctly for batch captures:
+    we capture the active window immediately before each capture starts,
+    not when DolphinController is first created.
+    """
+    from src.capture.dolphin import DolphinController, DolphinConfig
+    from src.capture.ffmpeg import FFmpegEncoder
+
+    call_order: list[str] = []
+    captured_restore_window: list[str | None] = []
+
+    def mock_get_active_window(self: DolphinController) -> str:
+        call_order.append("get_active_window")
+        return "12345"
+
+    def mock_start_capture(
+        self: DolphinController,
+        replay_path: Path,
+        output_dir: Path,
+        start_frame: int | None = None,
+        end_frame: int | None = None,
+        restore_window: str | None = None,
+    ) -> None:
+        call_order.append("start_capture")
+        captured_restore_window.append(restore_window)
+
+    with patch.object(DolphinController, "get_active_window", mock_get_active_window):
+        with patch.object(DolphinController, "start_capture", mock_start_capture):
+            with patch.object(DolphinController, "wait_for_completion", return_value=0):
+                with patch.object(FFmpegEncoder, "encode_avi"):
+                    with patch("src.capture.pipeline.write_sidecar_file"):
+                        output_dir = tmp_path / "clips"
+                        pipeline = CapturePipeline(
+                            output_dir=output_dir,
+                            dolphin_config=DolphinConfig(),
+                        )
+
+                        moment = TaggedMoment(
+                            replay_path=Path("/tmp/test.slp"),
+                            frame_start=100,
+                            frame_end=200,
+                            tags=["test"],
+                            metadata={"date": "2025-01-01", "stage": "battlefield", "player": "sheik"},
+                        )
+
+                        pipeline.capture_moment(moment, index=1)
+
+    # Verify get_active_window was called before start_capture
+    assert "get_active_window" in call_order, "get_active_window must be called"
+    assert "start_capture" in call_order, "start_capture must be called"
+    gaw_idx = call_order.index("get_active_window")
+    sc_idx = call_order.index("start_capture")
+    assert gaw_idx < sc_idx, "get_active_window must be called before start_capture"
+
+    # Verify the captured window ID was passed to start_capture
+    assert len(captured_restore_window) == 1
+    assert captured_restore_window[0] == "12345", "Active window ID must be passed to start_capture"

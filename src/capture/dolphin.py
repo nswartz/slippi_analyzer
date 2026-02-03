@@ -101,7 +101,7 @@ class DolphinController:
         self._stop_minimize_thread = threading.Event()
         self._minimized_windows: set[str] = set()
 
-    def _get_active_window(self) -> str | None:
+    def get_active_window(self) -> str | None:
         """Get the currently active window ID using xdotool."""
         try:
             result = subprocess.run(
@@ -379,6 +379,7 @@ $Netplay Safe Kill Music
         output_dir: Path,
         start_frame: int | None = None,
         end_frame: int | None = None,
+        restore_window: str | None = None,
     ) -> None:
         """Start Dolphin for frame capture.
 
@@ -387,6 +388,7 @@ $Netplay Safe Kill Music
             output_dir: Directory for output frames
             start_frame: Optional start frame for capture
             end_frame: Optional end frame for capture
+            restore_window: Window ID to restore focus to after capture
         """
         self.setup_frame_dump(output_dir)
 
@@ -410,8 +412,8 @@ $Netplay Safe Kill Music
             output_dir=output_dir,
         )
 
-        # Save current window for focus restoration
-        self._original_window = self._get_active_window()
+        # Use provided window ID or capture current for focus restoration
+        self._original_window = restore_window or self.get_active_window()
 
         # Start background thread to minimize windows as they appear
         self._start_window_minimizer()
