@@ -2,6 +2,7 @@
 
 import configparser
 import json
+import shutil
 import subprocess
 import threading
 import time
@@ -147,7 +148,6 @@ class DolphinController:
                     timeout=5,
                 )
             # Give processes time to terminate
-            import time
             time.sleep(0.5)
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
@@ -602,7 +602,6 @@ $Netplay Safe Kill Music
         if self._output_dir is None:
             raise RuntimeError("No output directory set. Call start_capture first.")
 
-        import shutil
         # Dolphin creates subdirectories: Frames/ for video, Audio/ for audio
         video_file = self._output_dir / "Frames" / "framedump0.avi"
         audio_file = self._output_dir / "Audio" / "dspdump.wav"
