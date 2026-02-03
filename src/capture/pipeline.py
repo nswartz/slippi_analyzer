@@ -67,9 +67,9 @@ class CapturePipeline:
             if return_code != 0:
                 return None
 
-            # Find Dolphin's output files
-            video_file = frame_dir / "framedump0.avi"
-            audio_file = frame_dir / "dspdump.wav"
+            # Find Dolphin's output files (in subdirectories created by Dolphin)
+            video_file = frame_dir / "Frames" / "framedump0.avi"
+            audio_file = frame_dir / "Audio" / "dspdump.wav"
 
             # Generate output filename
             filename = generate_clip_filename(moment, index)
@@ -93,7 +93,7 @@ class CapturePipeline:
     ) -> list[Path]:
         """Capture multiple moments as video clips.
 
-        Launches Dolphin once and reloads replays via commandId for efficiency.
+        Launches a fresh Dolphin instance per clip (batch mode required for frame dumping).
 
         Args:
             moments: List of moments to capture
@@ -106,36 +106,23 @@ class CapturePipeline:
 
         results: list[Path] = []
 
-        # Capture active window before starting batch
-        active_window = self._dolphin.get_active_window()
+        for i, moment in enumerate(moments, start=1):
+            # Capture active window RIGHT BEFORE each Dolphin launch
+            active_window = self._dolphin.get_active_window()
 
-        # We'll manage temp directories manually for persistent session
-        temp_dirs: list[str] = []
-
-        try:
-            for i, moment in enumerate(moments, start=1):
-                # Create temp dir for this clip's frames
-                temp_dir = tempfile.mkdtemp()
-                temp_dirs.append(temp_dir)
+            # Create temp directory for frames
+            with tempfile.TemporaryDirectory() as temp_dir:
                 frame_dir = Path(temp_dir) / "frames"
                 frame_dir.mkdir()
 
-                if i == 1:
-                    # First clip: launch Dolphin
-                    self._dolphin.start_capture(
-                        replay_path=moment.replay_path,
-                        output_dir=frame_dir,
-                        start_frame=moment.frame_start,
-                        end_frame=moment.frame_end,
-                        restore_window=active_window,
-                    )
-                else:
-                    # Subsequent clips: reload replay
-                    self._dolphin.reload_replay(
-                        replay_path=moment.replay_path,
-                        start_frame=moment.frame_start,
-                        end_frame=moment.frame_end,
-                    )
+                # Start Dolphin capture (batch mode - exits after replay)
+                self._dolphin.start_capture(
+                    replay_path=moment.replay_path,
+                    output_dir=frame_dir,
+                    start_frame=moment.frame_start,
+                    end_frame=moment.frame_end,
+                    restore_window=active_window,
+                )
 
                 # Wait for capture to complete
                 return_code = self._dolphin.wait_for_completion(frame_dir=frame_dir)
@@ -143,8 +130,8 @@ class CapturePipeline:
                     continue
 
                 # Find Dolphin's output files
-                video_file = frame_dir / "framedump0.avi"
-                audio_file = frame_dir / "dspdump.wav"
+                video_file = frame_dir / "Frames" / "framedump0.avi"
+                audio_file = frame_dir / "Audio" / "dspdump.wav"
 
                 # Generate output filename
                 filename = generate_clip_filename(moment, i)
@@ -161,13 +148,5 @@ class CapturePipeline:
                 write_sidecar_file(output_path, moment)
 
                 results.append(output_path)
-
-        finally:
-            # Stop Dolphin at the end of batch
-            self._dolphin.stop()
-
-            # Clean up all temp directories
-            for temp_dir in temp_dirs:
-                shutil.rmtree(temp_dir, ignore_errors=True)
 
         return results

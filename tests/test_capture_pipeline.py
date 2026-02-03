@@ -45,7 +45,7 @@ def test_pipeline_captures_single_moment(tmp_path: Path) -> None:
 
 
 def test_pipeline_captures_multiple_moments(tmp_path: Path) -> None:
-    """Pipeline captures multiple moments using persistent Dolphin session."""
+    """Pipeline captures multiple moments with fresh Dolphin per clip (batch mode)."""
     moments = [
         TaggedMoment(
             replay_path=Path(f"/replays/game{i}.slp"),
@@ -74,9 +74,10 @@ def test_pipeline_captures_multiple_moments(tmp_path: Path) -> None:
 
         # All 3 should be captured
         assert len(results) == 3
-        # Should start Dolphin once, then reload for remaining 2 clips
-        assert mock_dolphin_instance.start_capture.call_count == 1
-        assert mock_dolphin_instance.reload_replay.call_count == 2
+        # Should launch fresh Dolphin for each clip (batch mode required for frame dumping)
+        assert mock_dolphin_instance.start_capture.call_count == 3
+        # No reload - persistent mode doesn't dump frames
+        assert mock_dolphin_instance.reload_replay.call_count == 0
 
 
 def test_pipeline_handles_dolphin_failure(tmp_path: Path) -> None:
@@ -172,47 +173,50 @@ def test_capture_moment_gets_active_window_before_start_capture(tmp_path: Path) 
     assert captured_restore_window[0] == "12345", "Active window ID must be passed to start_capture"
 
 
-def test_capture_moments_uses_reload_for_subsequent_clips(tmp_path: Path) -> None:
-    """Batch capture should launch Dolphin once and reload for subsequent clips."""
+def test_capture_moments_launches_fresh_dolphin_per_clip(tmp_path: Path) -> None:
+    """Batch capture launches fresh Dolphin per clip (batch mode required for frame dump)."""
     from src.capture.dolphin import DolphinController, DolphinConfig
     from src.capture.ffmpeg import FFmpegEncoder
 
     start_capture_calls = 0
-    reload_replay_calls = 0
 
     def mock_start_capture(self: DolphinController, **kwargs: object) -> None:
         nonlocal start_capture_calls
         start_capture_calls += 1
-
-    def mock_reload_replay(self: DolphinController, **kwargs: object) -> None:
-        nonlocal reload_replay_calls
-        reload_replay_calls += 1
+        # Set _output_dir like the real method does
+        output_dir = kwargs.get("output_dir")
+        if output_dir is not None:
+            self._output_dir = output_dir if isinstance(output_dir, Path) else Path(str(output_dir))
+            # Create dummy output files like Dolphin would (in subdirectories)
+            frames_dir = self._output_dir / "Frames"
+            audio_dir = self._output_dir / "Audio"
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            (frames_dir / "framedump0.avi").touch()
+            (audio_dir / "dspdump.wav").touch()
 
     with patch.object(DolphinController, "start_capture", mock_start_capture):
-        with patch.object(DolphinController, "reload_replay", mock_reload_replay):
-            with patch.object(DolphinController, "wait_for_completion", return_value=0):
-                with patch.object(DolphinController, "stop"):
-                    with patch.object(DolphinController, "get_active_window", return_value="12345"):
-                        with patch.object(FFmpegEncoder, "encode_avi"):
-                            with patch("src.capture.pipeline.write_sidecar_file"):
-                                pipeline = CapturePipeline(
-                                    output_dir=tmp_path / "clips",
-                                    dolphin_config=DolphinConfig(),
-                                )
+        with patch.object(DolphinController, "wait_for_completion", return_value=0):
+            with patch.object(DolphinController, "get_active_window", return_value="12345"):
+                with patch.object(FFmpegEncoder, "encode_avi"):
+                    with patch("src.capture.pipeline.write_sidecar_file"):
+                        pipeline = CapturePipeline(
+                            output_dir=tmp_path / "clips",
+                            dolphin_config=DolphinConfig(),
+                        )
 
-                                moments = [
-                                    TaggedMoment(
-                                        replay_path=Path(f"/tmp/test{i}.slp"),
-                                        frame_start=i * 100,
-                                        frame_end=i * 100 + 50,
-                                        tags=["test"],
-                                        metadata={"date": "2025-01-01", "stage": "bf", "player": "fox"},
-                                    )
-                                    for i in range(3)
-                                ]
+                        moments = [
+                            TaggedMoment(
+                                replay_path=Path(f"/tmp/test{i}.slp"),
+                                frame_start=i * 100,
+                                frame_end=i * 100 + 50,
+                                tags=["test"],
+                                metadata={"date": "2025-01-01", "stage": "bf", "player": "fox"},
+                            )
+                            for i in range(3)
+                        ]
 
-                                pipeline.capture_moments(moments)
+                        pipeline.capture_moments(moments)
 
-    # Should start Dolphin once, then reload for remaining 2 clips
-    assert start_capture_calls == 1, f"Expected 1 start_capture call, got {start_capture_calls}"
-    assert reload_replay_calls == 2, f"Expected 2 reload_replay calls, got {reload_replay_calls}"
+    # Should launch fresh Dolphin for each clip (batch mode required for frame dumping)
+    assert start_capture_calls == 3, f"Expected 3 start_capture calls, got {start_capture_calls}"
