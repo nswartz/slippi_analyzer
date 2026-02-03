@@ -122,6 +122,30 @@ def test_setup_frame_dump_configures_dolphin_ini(tmp_path: Path) -> None:
     assert "DumpAudioSilent = True" in content, f"Expected DumpAudioSilent in: {content}"
 
 
+def test_setup_frame_dump_disables_image_dump(tmp_path: Path) -> None:
+    """setup_frame_dump sets DumpFramesAsImages = False to get AVI output.
+
+    By default, Dolphin may dump individual PNG frames. We need AVI for encoding.
+    """
+    user_dir = tmp_path / "dolphin"
+    user_dir.mkdir()
+
+    config = DolphinConfig(
+        executable=Path("/usr/bin/dolphin-emu"),
+        user_dir=user_dir,
+    )
+
+    controller = DolphinController(config)
+    output_dir = tmp_path / "frames"
+    controller.setup_frame_dump(output_dir=output_dir)
+
+    gfx_ini = user_dir / "Config" / "GFX.ini"
+    content = gfx_ini.read_text()
+
+    # Must disable image dump to get AVI output
+    assert "DumpFramesAsImages = False" in content, f"Expected DumpFramesAsImages = False in: {content}"
+
+
 def test_wait_for_completion_monitors_file_size(tmp_path: Path) -> None:
     """wait_for_completion terminates Dolphin when frame dump file stops growing."""
     config = DolphinConfig(

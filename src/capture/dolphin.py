@@ -392,6 +392,8 @@ $Netplay Safe Kill Music
 
         # Enable video frame dumping at internal resolution (for quality)
         gfx_config["Settings"]["InternalResolutionFrameDumps"] = "True"
+        # Dump as AVI, not individual PNG frames
+        gfx_config["Settings"]["DumpFramesAsImages"] = "False"
         # Set output directory for frame dumps (--output-directory flag is unreliable)
         gfx_config["Settings"]["DumpPath"] = str(output_dir)
 
